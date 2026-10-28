@@ -23,6 +23,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Build Lehko Extension & Rules
+        run: |
+          npm ci
+          npm run build
+          test -d dist && echo "Extension built successfully into dist/"
+
       - name: Free disk space on runner
         run: |
           chmod +x ci/*.sh
@@ -65,9 +77,9 @@ jobs:
           cd chromium_src
           ninja -C out/Release chrome
 
-      - name: Package DMG Installer
+      - name: Package DMG Installer with Embedded Modules
         run: |
-          ./ci/package-dmg.sh chromium_src/out/Release/Chromium.app Lehko-arm64.dmg
+          ./ci/package-dmg.sh chromium_src/out/Release/Chromium.app Lehko-arm64.dmg dist
 
       - name: Upload DMG Artifact
         uses: actions/upload-artifact@v4
@@ -84,10 +96,11 @@ jobs:
           name: "Lehko Browser v${{ github.event.inputs.chromium_version }} (Apple Silicon)"
           body: |
             ## Легко Browser (Apple Silicon ARM64)
-            - Built directly from Chromium source ${{ github.event.inputs.chromium_version }}
-            - Stripped telemetry, background AI/Lens, and unused daemons
-            - Native AV1 bypass (forces hardware VP9/H.264 decode for minimal CPU/battery usage)
-            - Native arm64 binary for macOS Apple Silicon (M1/M2/M3/M4)
+            - **Повноцінний автономний браузер** на базі Chromium ${{ github.event.inputs.chromium_version }}.
+            - **Вмонтований функціонал:** папки вкладок (Workspaces), блокування сміття та трекерів (DNR), вивантаження неактивної пам'яті.
+            - **Вшиті Lean-налаштування:** вимкнено телеметрію, Lens, фонові AI-моделі та Cast-демони.
+            - **Апаратне відео:** апаратне декодування VP9/H.264 замість AV1 для збереження батареї на Apple Silicon M1/M2/M3/M4.
+            - **Нативні DevTools:** повна підтримка інструментів розробника для QA-тестування.
           files: Lehko-arm64.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
