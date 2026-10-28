@@ -75,6 +75,16 @@ jobs:
           echo "Fetching Chromium pinned Clang compiler..."
           python3 tools/clang/scripts/update.py
 
+          echo "Fetching Chromium pinned Rust toolchain..."
+          python3 tools/rust/update_rust.py
+
+          # The tarball is exported from a Linux checkout, so the macOS Node binary that
+          # gclient hooks normally download is missing; point Chromium at the runner's Node.
+          echo "Linking runner Node.js into third_party/node..."
+          mkdir -p third_party/node/mac_arm64/node-darwin-arm64/bin
+          ln -sf "$(command -v node)" third_party/node/mac_arm64/node-darwin-arm64/bin/node
+          third_party/node/mac_arm64/node-darwin-arm64/bin/node --version
+
           echo "Applying AV1 hardware fallback patch..."
           patch -p1 < ../patches/01-disable-av1.patch || true
 

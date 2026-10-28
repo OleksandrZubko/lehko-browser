@@ -25,4 +25,8 @@ google_default_client_secret = ""
 
 # Build flags
 is_component_build = false
+# Source tarballs ship without PGO profiles; official builds otherwise fail in gn gen.
+chrome_pgo_phase = 0
+# Official builds default to dSYMs, which need the dsymutil gclient hook (absent in tarballs).
+enable_dsyms = false
 treat_warnings_as_errors = false
