@@ -48,8 +48,13 @@ jobs:
           export PATH="$RUNNER_TEMP/depot_tools:$PATH"
           echo "Bootstrapping depot_tools..."
           "$RUNNER_TEMP/depot_tools/update_depot_tools" || true
-          # Run gclient once to complete bootstrap and verify python3 / CIPD packages
-          gclient --version || true
+
+          echo "Installing official native GN binary for macOS arm64..."
+          mkdir -p "$RUNNER_TEMP/gn_bin"
+          cipd install "gn/gn/mac-arm64" latest -root "$RUNNER_TEMP/gn_bin"
+          echo "$RUNNER_TEMP/gn_bin" >> $GITHUB_PATH
+          export PATH="$RUNNER_TEMP/gn_bin:$PATH"
+          "$RUNNER_TEMP/gn_bin/gn" --version
 
       - name: Download Chromium source tarball
         run: |
@@ -65,7 +70,7 @@ jobs:
       - name: Setup Clang Toolchain and Apply Lehko Patches
         run: |
           cd chromium_src
-          export PATH="$RUNNER_TEMP/depot_tools:$PATH"
+          export PATH="$RUNNER_TEMP/gn_bin:$RUNNER_TEMP/depot_tools:$PATH"
 
           echo "Fetching Chromium pinned Clang compiler..."
           python3 tools/clang/scripts/update.py
@@ -80,13 +85,13 @@ jobs:
       - name: Generate build files (gn gen)
         run: |
           cd chromium_src
-          export PATH="$RUNNER_TEMP/depot_tools:$PATH"
+          export PATH="$RUNNER_TEMP/gn_bin:$RUNNER_TEMP/depot_tools:$PATH"
           gn gen out/Release
 
       - name: Compile Chromium (ninja)
         run: |
           cd chromium_src
-          export PATH="$RUNNER_TEMP/depot_tools:$PATH"
+          export PATH="$RUNNER_TEMP/gn_bin:$RUNNER_TEMP/depot_tools:$PATH"
           ninja -C out/Release chrome
 
       - name: Package DMG Installer with Embedded Modules
