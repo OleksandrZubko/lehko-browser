@@ -1,0 +1,34 @@
+{
+  "name": "light-browser-lab",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "rules": "node scripts/build-rules.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "test:browser": "npm run build && node scripts/browser-smoke.mjs",
+    "test:metrics": "python3 -m unittest discover -s tests -p '*_test.py'",
+    "package": "npm run build && node scripts/package.mjs",
+    "open:lab": "node scripts/open-lab.mjs",
+    "open:lean": "node scripts/open-lab.mjs lean",
+    "app": "npm run build && node scripts/build-app.mjs",
+    "test:savings": "npm run build && node scripts/savings-smoke.mjs",
+    "test:folders": "npm run build && node scripts/folders-smoke.mjs",
+    "benchmark:fixtures": "node scripts/fixture-server.mjs",
+    "benchmark:collect": "python3 scripts/collect_metrics.py",
+    "test:collector": "node scripts/collector-smoke.mjs",
+    "benchmark:report": "python3 scripts/report_metrics.py",
+    "test:protection": "npm run build && node scripts/protection-smoke.mjs",
+    "benchmark:folders": "node scripts/folders-benchmark.mjs"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.0",
+    "typescript": "^5.9.3",
+    "playwright": "^1.62.1"
+  }
+}

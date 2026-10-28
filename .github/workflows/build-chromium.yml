@@ -1,0 +1,93 @@
+name: Build Lehko Chromium (macOS arm64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      chromium_version:
+        description: 'Chromium Stable Version (e.g. 132.0.6834.110)'
+        required: true
+        default: '132.0.6834.110'
+      create_release:
+        description: 'Publish as GitHub Release'
+        type: boolean
+        required: true
+        default: true
+
+jobs:
+  build:
+    name: Build Chromium Apple Silicon (arm64)
+    runs-on: macos-14
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space on runner
+        run: |
+          chmod +x ci/*.sh
+          ./ci/clean-disk.sh
+
+      - name: Install build prerequisites
+        run: |
+          brew install ninja ccache
+          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$RUNNER_TEMP/depot_tools"
+          echo "$RUNNER_TEMP/depot_tools" >> $GITHUB_PATH
+
+      - name: Download Chromium source tarball
+        run: |
+          VERSION="${{ github.event.inputs.chromium_version }}"
+          echo "Downloading Chromium $VERSION..."
+          mkdir -p chromium_src
+          curl -fSL "https://commondatastorage.googleapis.com/chromium-browser-official/chromium-${VERSION}.tar.xz" -o chromium.tar.xz
+          echo "Extracting tarball (this may take a few minutes)..."
+          tar -xf chromium.tar.xz -C chromium_src --strip-components=1
+          rm -f chromium.tar.xz
+          echo "Extracted source tree successfully."
+
+      - name: Apply Lehko Patches & Configuration
+        run: |
+          cd chromium_src
+          echo "Applying AV1 hardware fallback patch..."
+          patch -p1 < ../patches/01-disable-av1.patch || true
+
+          echo "Setting up Lean GN arguments..."
+          mkdir -p out/Release
+          cp ../patches/args.gn out/Release/args.gn
+
+      - name: Generate build files (gn gen)
+        run: |
+          cd chromium_src
+          gn gen out/Release
+
+      - name: Compile Chromium (ninja)
+        run: |
+          cd chromium_src
+          ninja -C out/Release chrome
+
+      - name: Package DMG Installer
+        run: |
+          ./ci/package-dmg.sh chromium_src/out/Release/Chromium.app Lehko-arm64.dmg
+
+      - name: Upload DMG Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lehko-arm64-dmg
+          path: Lehko-arm64.dmg
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        if: ${{ github.event.inputs.create_release == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ github.event.inputs.chromium_version }}"
+          name: "Lehko Browser v${{ github.event.inputs.chromium_version }} (Apple Silicon)"
+          body: |
+            ## Легко Browser (Apple Silicon ARM64)
+            - Built directly from Chromium source ${{ github.event.inputs.chromium_version }}
+            - Stripped telemetry, background AI/Lens, and unused daemons
+            - Native AV1 bypass (forces hardware VP9/H.264 decode for minimal CPU/battery usage)
+            - Native arm64 binary for macOS Apple Silicon (M1/M2/M3/M4)
+          files: Lehko-arm64.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

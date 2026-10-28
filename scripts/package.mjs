@@ -1,0 +1,10 @@
+import { mkdir, rm } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+const root = fileURLToPath(new URL('../', import.meta.url));
+const { version } = (await import('../package.json', { with: { type: 'json' } })).default;
+const archive = `lehko-${version}.zip`;
+await mkdir(new URL('../artifacts/', import.meta.url), { recursive: true });
+await rm(new URL(`../artifacts/${archive}`, import.meta.url), { force: true });
+execFileSync('zip', ['-qr', `../artifacts/${archive}`, '.'], { cwd: `${root}dist`, stdio: 'inherit' });
+console.log(`Packaged → artifacts/${archive} (unzip, then Load unpacked)`);

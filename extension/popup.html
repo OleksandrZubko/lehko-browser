@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Легко — Browser Lab</title>
+  <link rel="stylesheet" href="popup.css">
+  <script type="module" src="popup.js"></script>
+  <script type="module" src="savings-popup.js"></script>
+  <script type="module" src="folders-popup.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="brand"><span class="mark" aria-hidden="true">л.</span><div><h1>Легко</h1><p>Менше зайвого у пам’яті.</p></div></div>
+      <span class="tag">LAB 0.3</span>
+    </header>
+
+    <section class="folders" aria-labelledby="folders-title">
+      <h2 id="folders-title">Папки</h2>
+      <p class="hint">У вікні відкриті лише вкладки поточної папки, решта не займає пам’ять. Закріплені вкладки не входять до папок.</p>
+      <ul id="folders-list" class="folder-list"></ul>
+      <div id="folders-blocked" class="folder-blocked" role="alert" hidden></div>
+      <div id="folders-footer" class="folder-footer"></div>
+      <p id="folders-message" class="error" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="savings" aria-label="Економія ресурсів">
+      <div class="toggle-row"><div><h2>Реклама</h2><p>EasyList: менше скриптів, iframe і відео-реклами.</p></div>
+        <label class="switch"><input id="rules-ads" type="checkbox" role="switch" aria-label="Блокувати рекламу" disabled><span aria-hidden="true"></span></label></div>
+      <div class="toggle-row"><div><h2>Трекери</h2><p>EasyPrivacy: аналітика й пікселі не завантажуються.</p></div>
+        <label class="switch"><input id="rules-privacy" type="checkbox" role="switch" aria-label="Блокувати трекери" disabled><span aria-hidden="true"></span></label></div>
+      <div class="toggle-row"><div><h2>Чужі вбудовані фрейми</h2><p>Суворо: блокує віджети, вбудоване відео й коментарі інших сайтів. Капчі, оплата й вхід працюють.</p></div>
+        <label class="switch"><input id="rules-frames" type="checkbox" role="switch" aria-label="Блокувати сторонні фрейми" disabled><span aria-hidden="true"></span></label></div>
+      <div class="toggle-row"><div><h2>YouTube без AV1</h2><p>M1 декодує AV1 програмно. Без нього відео йде через апаратний VP9/H.264.</p></div>
+        <label class="switch"><input id="no-av1" type="checkbox" role="switch" aria-label="Вимкнути AV1 на YouTube" disabled><span aria-hidden="true"></span></label></div>
+      <div class="site-row"><span id="pause-description">Блокування працює на цьому сайті.</span><button id="toggle-pause" class="text-button" disabled>Вимкнути тут</button></div>
+      <button id="discard-others" class="primary" disabled>Звільнити пам’ять зараз</button>
+      <p class="hint" id="discard-hint">Вивантажує всі фонові вкладки, крім закріплених, зі звуком, з відкритими DevTools і тестових сайтів. Вони перезавантажаться, коли ви їх відкриєте.</p>
+      <details id="qa-details"><summary>QA і тестові сайти <span id="qa-count"></span></summary>
+        <div class="toggle-row"><div><h2>Без блокування на тестових</h2><p>localhost, 127.0.0.1, *.test, *.local, приватні IP і позначені стейджинги: пікселі, аналітика й оплата завантажуються. Такі вкладки не вивантажуються.</p></div>
+          <label class="switch"><input id="qa-bypass" type="checkbox" role="switch" aria-label="Без блокування на тестових сайтах" disabled><span aria-hidden="true"></span></label></div>
+        <div class="site-row"><span id="qa-description">Завантаження…</span><button id="qa-site" class="text-button" disabled hidden>Позначити як тестовий</button></div>
+        <ul id="qa-hosts" class="host-list"></ul>
+        <div class="toggle-row"><div><h2>Захист незбережених форм</h2><p>Перед вивантаженням або перемиканням папки перевіряє поля вкладки. Потрібен доступ до сайтів; сторінки нічого не завантажують заздалегідь.</p></div>
+          <label class="switch"><input id="form-protection" type="checkbox" role="switch" aria-label="Захист незбережених форм" disabled><span aria-hidden="true"></span></label></div>
+      </details>
+      <details id="dev-details"><summary>Набір «Розробка» <span id="dev-count"></span></summary>
+        <div class="toggle-row"><div><p>Позначені розширення вмикаються й вимикаються разом.</p></div>
+          <label class="switch"><input id="dev-active" type="checkbox" role="switch" aria-label="Набір «Розробка» увімкнено" disabled><span aria-hidden="true"></span></label></div>
+        <ul id="dev-list" class="host-list"></ul></details>
+      <p id="savings-message" class="error" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="mode" aria-labelledby="mode-title">
+      <div><h2 id="mode-title">Автовивантаження вкладок</h2><p id="mode-description">Завантаження…</p></div>
+      <label class="switch"><input id="enabled" type="checkbox" role="switch" aria-label="Економія вкладок" disabled><span aria-hidden="true"></span></label>
+    </section>
+
+    <section class="site" aria-labelledby="site-title">
+      <span class="eyebrow">ПОТОЧНИЙ САЙТ</span>
+      <h2 id="site-title">Завантаження…</h2>
+      <p id="site-description">Економія працює тільки там, де ви її дозволили.</p>
+      <label id="confirmation" class="confirmation"><input id="safe-site" type="checkbox">На цьому сайті немає дзвінка, незбереженої роботи або передачі файлів.</label>
+      <button id="toggle-site" class="primary" disabled>Дозволити економію на цьому сайті</button>
+    </section>
+
+    <div class="setting-row"><label for="timeout">Вивантажувати після</label><select id="timeout" disabled><option value="15">15 хвилин</option><option value="30">30 хвилин</option><option value="60">60 хвилин</option></select></div>
+    <p class="hint">П’ять останніх вкладок залишаються готовими. Вивантажені сторінки перезавантажуються при поверненні.</p>
+
+    <section class="stats" aria-label="Статистика сесії">
+      <div><strong id="discarded-count">—</strong><span>вивантажень за сесію</span></div>
+      <div><strong id="currently-discarded">—</strong><span>вкладок вивантажено зараз</span></div>
+    </section>
+
+    <details><summary>Що відбувається з вкладками <span id="tab-count"></span></summary><p class="hint">Захищаємо активні вкладки, закріплені, зі звуком, з відкритими DevTools, тестові сайти й, за дозволу, вкладки з незбереженими формами.</p><ul id="tab-status" class="tab-list"></ul></details>
+    <details><summary>Дозволені сайти <span id="host-count"></span></summary><ul id="allowed-hosts" class="host-list"></ul></details>
+
+    <p id="message" role="status" aria-live="polite"></p>
+    <footer><span id="last-check">Перевірка раз на хвилину</span><button id="refresh" class="text-button">Оновити</button></footer>
+    <p class="privacy">Дані залишаються на цьому пристрої. Дозвіл «вкладки» дає доступ до адрес і назв, папки зберігають лише їх. Блокування працює за правилами браузера без доступу до сторінок. Скрипт «без AV1» запускається тільки на YouTube, а перевірка форм лише порівнює поля з початковими значеннями перед вивантаженням чи перемиканням папки; обидва працюють тільки після вашого дозволу.</p>
+  </main>
+</body>
+</html>

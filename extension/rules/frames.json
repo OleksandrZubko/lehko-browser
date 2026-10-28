@@ -1,0 +1,1 @@
+[{"id":1,"priority":1,"action":{"type":"block"},"condition":{"resourceTypes":["sub_frame"],"domainType":"thirdParty","excludedRequestDomains":["google.com","gstatic.com","recaptcha.net","hcaptcha.com","challenges.cloudflare.com","stripe.com","stripe.network","paypal.com","appleid.apple.com","accounts.google.com","login.microsoftonline.com"]}}]

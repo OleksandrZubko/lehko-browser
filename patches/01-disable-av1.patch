@@ -1,0 +1,13 @@
+--- a/media/base/supported_types.cc
++++ b/media/base/supported_types.cc
+@@ -210,6 +210,10 @@ bool IsDefaultSupportedVideoType(const VideoType& type) {
+   if (!IsColorSpaceSupported(type.color_space))
+     return false;
+ 
++  // Lehko: Force fallback to hardware-accelerated VP9/H.264 on Apple Silicon
++  if (type.codec == VideoCodec::kAV1)
++    return false;
++
+   switch (type.codec) {
+     case VideoCodec::kAV1:
+       return false;

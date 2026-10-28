@@ -1,0 +1,31 @@
+:root {
+  --bg: #ffffff; --fg: #1c1e21; --muted: #6b7280; --hover: #f1f3f5; --current: #eaf1ff;
+  --border: #e3e6ea; --danger: #d92d20; --accent: #2f6bff;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #202124; --fg: #e8eaed; --muted: #9aa0a6; --hover: #2d2f33; --current: #263552; --border: #3c4043; --danger: #ff6b60; --accent: #7aa2ff; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; width: 260px; background: var(--bg); color: var(--fg); font: 13px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; }
+ul { list-style: none; margin: 0; padding: 4px; max-height: 360px; overflow-y: auto; }
+li { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 3px 6px; border-radius: 6px; cursor: pointer; }
+li:hover { background: var(--hover); }
+li.current { background: var(--current); }
+.mark { width: 12px; color: var(--accent); text-align: center; flex: none; }
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.count { color: var(--muted); font-size: 12px; flex: none; }
+.actions { display: none; gap: 2px; flex: none; }
+li:hover .actions, li:focus-within .actions { display: flex; }
+li:hover .count, li:focus-within .count { display: none; }
+button { font: inherit; color: inherit; background: none; border: 0; border-radius: 4px; padding: 2px 6px; cursor: pointer; }
+button:hover:not(:disabled) { background: var(--border); }
+button:disabled { opacity: .35; cursor: default; }
+button.danger { color: var(--danger); }
+input { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--accent); border-radius: 4px; padding: 2px 6px; min-width: 0; width: 100%; outline: none; }
+li input { flex: 1; width: auto; }
+.confirm { flex: none; color: var(--danger); display: flex; align-items: center; gap: 2px; }
+footer { padding: 4px; border-top: 1px solid var(--border); }
+footer button { width: 100%; text-align: left; padding: 6px; color: var(--accent); }
+#error { margin: 0; padding: 6px 10px; color: var(--danger); }

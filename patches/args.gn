@@ -1,0 +1,34 @@
+# Lean Chromium GN Arguments for Apple Silicon (macOS arm64)
+# Optimized for minimal RAM, CPU, and disk footprint
+
+is_debug = false
+is_official_build = true
+symbol_level = 0
+blink_symbol_level = 0
+v8_symbol_level = 0
+
+target_os = "mac"
+target_cpu = "arm64"
+
+# Codecs: Support H.264/AAC/VP9 for web compatibility
+proprietary_codecs = true
+ffmpeg_branding = "Chrome"
+
+# Strip bloat & background services
+enable_nacl = false
+enable_media_router = false
+enable_paint_preview = false
+enable_hang_monitor = false
+enable_feed_v2 = false
+enable_lens_desktop_google_branded_ui = false
+enable_compose = false
+enable_reporting = false
+
+# Remove Google telemetry & client IDs
+google_api_key = ""
+google_default_client_id = ""
+google_default_client_secret = ""
+
+# Security and Sandbox
+is_component_build = false
+treat_warnings_as_errors = false

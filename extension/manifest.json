@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Легко — Browser Lab",
+  "version": "0.3.0",
+  "description": "Блокує рекламу й трекери, звільняє пам’ять вкладок і зменшує навантаження на CPU.",
+  "minimum_chrome_version": "120",
+  "permissions": ["tabs", "storage", "alarms", "declarativeNetRequest", "scripting", "management"],
+  "optional_host_permissions": ["*://*.youtube.com/*", "*://*.youtube-nocookie.com/*", "<all_urls>"],
+  "declarative_net_request": {
+    "rule_resources": [
+      { "id": "ads", "enabled": true, "path": "rules/ads.json" },
+      { "id": "privacy", "enabled": true, "path": "rules/privacy.json" },
+      { "id": "frames", "enabled": false, "path": "rules/frames.json" }
+    ]
+  },
+  "devtools_page": "devtools.html",
+  "background": { "service_worker": "worker.js", "type": "module" },
+  "action": {
+    "default_title": "Легко — економія ресурсів",
+    "default_popup": "popup.html"
+  },
+  "commands": {
+    "_execute_action": { "suggested_key": { "default": "Alt+Shift+F" } }
+  },
+  "incognito": "not_allowed",
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'" }
+}
