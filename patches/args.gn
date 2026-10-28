@@ -17,18 +17,12 @@ ffmpeg_branding = "Chrome"
 # Strip bloat & background services
 enable_nacl = false
 enable_media_router = false
-enable_paint_preview = false
-enable_hang_monitor = false
-enable_feed_v2 = false
-enable_lens_desktop_google_branded_ui = false
-enable_compose = false
-enable_reporting = false
 
 # Remove Google telemetry & client IDs
 google_api_key = ""
 google_default_client_id = ""
 google_default_client_secret = ""
 
-# Security and Sandbox
+# Build flags
 is_component_build = false
 treat_warnings_as_errors = false

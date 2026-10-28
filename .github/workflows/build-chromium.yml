@@ -40,11 +40,16 @@ jobs:
           chmod +x ci/*.sh
           ./ci/clean-disk.sh
 
-      - name: Install build prerequisites
+      - name: Install build prerequisites & bootstrap depot_tools
         run: |
           brew install ninja ccache
           git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$RUNNER_TEMP/depot_tools"
           echo "$RUNNER_TEMP/depot_tools" >> $GITHUB_PATH
+          export PATH="$RUNNER_TEMP/depot_tools:$PATH"
+          echo "Bootstrapping depot_tools..."
+          "$RUNNER_TEMP/depot_tools/update_depot_tools" || true
+          # Run gclient once to complete bootstrap and verify python3 / CIPD packages
+          gclient --version || true
 
       - name: Download Chromium source tarball
         run: |
@@ -57,9 +62,14 @@ jobs:
           rm -f chromium.tar.xz
           echo "Extracted source tree successfully."
 
-      - name: Apply Lehko Patches & Configuration
+      - name: Setup Clang Toolchain and Apply Lehko Patches
         run: |
           cd chromium_src
+          export PATH="$RUNNER_TEMP/depot_tools:$PATH"
+
+          echo "Fetching Chromium pinned Clang compiler..."
+          python3 tools/clang/scripts/update.py
+
           echo "Applying AV1 hardware fallback patch..."
           patch -p1 < ../patches/01-disable-av1.patch || true
 
@@ -70,11 +80,13 @@ jobs:
       - name: Generate build files (gn gen)
         run: |
           cd chromium_src
+          export PATH="$RUNNER_TEMP/depot_tools:$PATH"
           gn gen out/Release
 
       - name: Compile Chromium (ninja)
         run: |
           cd chromium_src
+          export PATH="$RUNNER_TEMP/depot_tools:$PATH"
           ninja -C out/Release chrome
 
       - name: Package DMG Installer with Embedded Modules
