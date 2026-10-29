@@ -37,7 +37,9 @@ env:
 jobs:
   stage:
     name: Stage ${{ inputs.stage }}
-    runs-on: macos-14
+    # Chromium 156 pins macOS SDK 26.5 (build/config/mac/mac_sdk.gni); macos-14 tops out at
+    # SDK 15.2 and gn gen fails on the missing DarwinFoundation*.modulemap files.
+    runs-on: macos-26
     timeout-minutes: 360
     outputs:
       done: ${{ steps.result.outputs.done }}

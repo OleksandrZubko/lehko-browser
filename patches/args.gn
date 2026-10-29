@@ -16,7 +16,6 @@ ffmpeg_branding = "Chrome"
 
 # Strip bloat & background services
 enable_nacl = false
-enable_media_router = false
 
 # Remove Google telemetry & client IDs
 # Without an API key Safe Browsing gets no list updates, so the build has no protection

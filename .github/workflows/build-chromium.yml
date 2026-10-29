@@ -88,7 +88,7 @@ jobs:
     needs: [stage1, stage2, stage3, stage4, stage5]
     # Later stages are skipped once one finishes, so look for any stage that built the app.
     if: ${{ !cancelled() && contains(needs.*.outputs.done, 'true') }}
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 60
 
     steps:
