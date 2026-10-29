@@ -108,7 +108,11 @@ jobs:
         run: |
           cd chromium_src/src
           export PATH="$RUNNER_TEMP/gn_bin:$RUNNER_TEMP/depot_tools:$PATH"
-          ninja -C out/Release chrome
+          # Chromium 132 misses an ordering dep: components/language_detection includes
+          # metadata_schema_generated.h, produced only via tflite_support's private deps.
+          ninja -C out/Release third_party/tflite_support:metadata_schema
+          # Retry once so any other generated-header race is picked up incrementally.
+          ninja -C out/Release chrome || ninja -C out/Release chrome
 
       - name: Package DMG Installer with Embedded Modules
         run: |
