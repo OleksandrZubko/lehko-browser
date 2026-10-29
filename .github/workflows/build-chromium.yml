@@ -66,6 +66,9 @@ jobs:
           export DEPOT_TOOLS_UPDATE=0
           mkdir -p chromium_src
           cd chromium_src
+          # Node resolves module type from the nearest package.json; without this boundary
+          # Chromium's CommonJS build scripts inherit "type": "module" from the Lehko root.
+          echo '{ "type": "commonjs" }' > package.json
           cat > .gclient <<'GCLIENT'
           solutions = [{
             "name": "src",
