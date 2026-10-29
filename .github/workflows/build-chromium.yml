@@ -1,5 +1,9 @@
 name: Build Lehko Chromium (macOS arm64)
 
+# The Chromium build outlasts the 6h limit of a GitHub-hosted job, so it runs as a chain
+# of resumable stages (see build-stage.yml). Each stage saves the tree for the next one;
+# stages after the one that finishes are skipped, and the package job turns the app into a DMG.
+
 on:
   workflow_dispatch:
     inputs:
@@ -12,12 +16,70 @@ on:
         type: boolean
         required: true
         default: true
+      resume_from_run:
+        description: 'Run ID to resume from (its newest chromium-state-* artifact); empty = fresh checkout'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  actions: read
 
 jobs:
-  build:
-    name: Build Chromium Apple Silicon (arm64)
+  stage1:
+    uses: ./.github/workflows/build-stage.yml
+    with:
+      stage: 1
+      chromium_version: ${{ inputs.chromium_version }}
+      state_run: ${{ inputs.resume_from_run }}
+
+  stage2:
+    needs: stage1
+    if: ${{ needs.stage1.outputs.done == 'false' }}
+    uses: ./.github/workflows/build-stage.yml
+    with:
+      stage: 2
+      chromium_version: ${{ inputs.chromium_version }}
+      state_run: ${{ github.run_id }}
+      state_artifact: chromium-state-1
+
+  stage3:
+    needs: stage2
+    if: ${{ needs.stage2.outputs.done == 'false' }}
+    uses: ./.github/workflows/build-stage.yml
+    with:
+      stage: 3
+      chromium_version: ${{ inputs.chromium_version }}
+      state_run: ${{ github.run_id }}
+      state_artifact: chromium-state-2
+
+  stage4:
+    needs: stage3
+    if: ${{ needs.stage3.outputs.done == 'false' }}
+    uses: ./.github/workflows/build-stage.yml
+    with:
+      stage: 4
+      chromium_version: ${{ inputs.chromium_version }}
+      state_run: ${{ github.run_id }}
+      state_artifact: chromium-state-3
+
+  stage5:
+    needs: stage4
+    if: ${{ needs.stage4.outputs.done == 'false' }}
+    uses: ./.github/workflows/build-stage.yml
+    with:
+      stage: 5
+      chromium_version: ${{ inputs.chromium_version }}
+      state_run: ${{ github.run_id }}
+      state_artifact: chromium-state-4
+
+  package:
+    name: Package DMG
+    needs: [stage1, stage2, stage3, stage4, stage5]
+    # Later stages are skipped once one finishes, so look for any stage that built the app.
+    if: ${{ !cancelled() && contains(needs.*.outputs.done, 'true') }}
     runs-on: macos-14
-    timeout-minutes: 360
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -35,88 +97,18 @@ jobs:
           npm run build
           test -d dist && echo "Extension built successfully into dist/"
 
-      - name: Free disk space on runner
-        run: |
-          chmod +x ci/*.sh
-          ./ci/clean-disk.sh
-
-      - name: Install build prerequisites & bootstrap depot_tools
-        run: |
-          brew install ninja ccache
-          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$RUNNER_TEMP/depot_tools"
-          echo "$RUNNER_TEMP/depot_tools" >> $GITHUB_PATH
-          export PATH="$RUNNER_TEMP/depot_tools:$PATH"
-          echo "Bootstrapping depot_tools..."
-          "$RUNNER_TEMP/depot_tools/update_depot_tools" || true
-
-          echo "Installing official native GN binary for macOS arm64..."
-          mkdir -p "$RUNNER_TEMP/gn_bin"
-          cipd install "gn/gn/mac-arm64" latest -root "$RUNNER_TEMP/gn_bin"
-          echo "$RUNNER_TEMP/gn_bin" >> $GITHUB_PATH
-          export PATH="$RUNNER_TEMP/gn_bin:$PATH"
-          "$RUNNER_TEMP/gn_bin/gn" --version
-
-      # Official source tarballs are exported from a Linux checkout and lack every macOS-only
-      # dependency (google_toolbox_for_mac, angle-metal, dsymutil, mac Node, ...). A shallow
-      # gclient checkout with target_os=mac pulls exactly what DEPS pins for this platform.
-      - name: Fetch Chromium source (gclient, shallow)
-        run: |
-          VERSION="${{ github.event.inputs.chromium_version }}"
-          export PATH="$RUNNER_TEMP/gn_bin:$RUNNER_TEMP/depot_tools:$PATH"
-          export DEPOT_TOOLS_UPDATE=0
-          mkdir -p chromium_src
-          cd chromium_src
-          # Node resolves module type from the nearest package.json; without this boundary
-          # Chromium's CommonJS build scripts inherit "type": "module" from the Lehko root.
-          echo '{ "type": "commonjs" }' > package.json
-          cat > .gclient <<'GCLIENT'
-          solutions = [{
-            "name": "src",
-            "url": "https://chromium.googlesource.com/chromium/src.git",
-            "managed": False,
-            "custom_deps": {},
-            "custom_vars": {},
-          }]
-          target_os = ["mac"]
-          GCLIENT
-          echo "Cloning chromium/src at tag $VERSION..."
-          git clone --depth 1 --branch "$VERSION" https://chromium.googlesource.com/chromium/src.git src
-          echo "Syncing pinned dependencies..."
-          gclient sync --no-history --shallow --nohooks -j 8
-          echo "Running gclient hooks (toolchains, lastchange, dsymutil, ...)..."
-          gclient runhooks
-          df -h /
-
-      - name: Apply Lehko Patches
-        run: |
-          cd chromium_src/src
-
-          echo "Applying AV1 hardware fallback patch..."
-          patch -p1 < "$GITHUB_WORKSPACE/patches/01-disable-av1.patch" || true
-
-          echo "Setting up Lean GN arguments..."
-          mkdir -p out/Release
-          cp "$GITHUB_WORKSPACE/patches/args.gn" out/Release/args.gn
-
-      - name: Generate build files (gn gen)
-        run: |
-          cd chromium_src/src
-          export PATH="$RUNNER_TEMP/gn_bin:$RUNNER_TEMP/depot_tools:$PATH"
-          gn gen out/Release
-
-      - name: Compile Chromium (ninja)
-        run: |
-          cd chromium_src/src
-          export PATH="$RUNNER_TEMP/gn_bin:$RUNNER_TEMP/depot_tools:$PATH"
-          # Chromium 132 misses an ordering dep: components/language_detection includes
-          # metadata_schema_generated.h, produced only via tflite_support's private deps.
-          ninja -C out/Release third_party/tflite_support:metadata_schema
-          # Retry once so any other generated-header race is picked up incrementally.
-          ninja -C out/Release chrome || ninja -C out/Release chrome
+      - name: Download Chromium.app
+        uses: actions/download-artifact@v4
+        with:
+          name: chromium-app
+          path: ${{ runner.temp }}
 
       - name: Package DMG Installer with Embedded Modules
         run: |
-          ./ci/package-dmg.sh chromium_src/src/out/Release/Chromium.app Lehko-arm64.dmg dist
+          mkdir -p chromium_app
+          tar -xpf "$RUNNER_TEMP/chromium-app.tar" -C chromium_app
+          chmod +x ci/*.sh
+          ./ci/package-dmg.sh chromium_app/Chromium.app Lehko-arm64.dmg dist
 
       - name: Upload DMG Artifact
         uses: actions/upload-artifact@v4

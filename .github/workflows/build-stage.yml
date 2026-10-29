@@ -1,0 +1,228 @@
+name: Chromium build stage
+
+# One resumable slice of the Chromium build. GitHub-hosted jobs stop at 6 hours and the
+# runner is wiped afterwards, so each stage restores the previous checkout + out/ (with
+# mtimes intact, so ninja resumes), builds until its time budget runs out, and saves the
+# tree again as an artifact for the next stage. The stage that finishes uploads Chromium.app.
+
+on:
+  workflow_call:
+    inputs:
+      stage:
+        type: number
+        required: true
+      chromium_version:
+        type: string
+        required: true
+      state_run:
+        description: 'Run ID holding the state to restore; empty starts from a fresh checkout'
+        type: string
+        default: ''
+      state_artifact:
+        description: 'State artifact name in state_run; empty picks the newest one'
+        type: string
+        default: ''
+    outputs:
+      done:
+        value: ${{ jobs.stage.outputs.done }}
+
+env:
+  # Leave enough of the 6h job limit to compress and upload the tree after ninja stops.
+  NINJA_DEADLINE_MINUTES: 290
+
+jobs:
+  stage:
+    name: Stage ${{ inputs.stage }}
+    runs-on: macos-14
+    timeout-minutes: 360
+    outputs:
+      done: ${{ steps.result.outputs.done }}
+
+    steps:
+      - name: Record job start
+        run: echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space and select Xcode
+        run: |
+          chmod +x ci/*.sh
+          ./ci/clean-disk.sh
+
+      - name: Install build prerequisites & bootstrap depot_tools
+        run: |
+          brew install ninja zstd coreutils
+          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$RUNNER_TEMP/depot_tools"
+          export PATH="$RUNNER_TEMP/depot_tools:$PATH"
+          "$RUNNER_TEMP/depot_tools/update_depot_tools" || true
+
+          # build.ninja records this path for gn re-runs, so every stage installs gn here.
+          mkdir -p "$RUNNER_TEMP/gn_bin"
+          cipd install "gn/gn/mac-arm64" latest -root "$RUNNER_TEMP/gn_bin"
+          "$RUNNER_TEMP/gn_bin/gn" --version
+
+      - name: Locate saved build state
+        id: state
+        if: ${{ inputs.state_run != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NAME="${{ inputs.state_artifact }}"
+          if [[ -z "$NAME" ]]; then
+            NAME=$(gh api "repos/${{ github.repository }}/actions/runs/${{ inputs.state_run }}/artifacts?per_page=100" \
+              --jq '[.artifacts[] | select(.name | startswith("chromium-state-")) | select(.expired | not)]
+                    | sort_by(.created_at) | last | .name // empty')
+          fi
+          if [[ -z "$NAME" ]]; then
+            echo "::error::No chromium-state-* artifact found in run ${{ inputs.state_run }}"
+            exit 1
+          fi
+          echo "Restoring $NAME from run ${{ inputs.state_run }}"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Download saved build state
+        if: ${{ inputs.state_run != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.state.outputs.name }}
+          path: ${{ runner.temp }}/state
+          run-id: ${{ inputs.state_run }}
+          github-token: ${{ github.token }}
+
+      - name: Restore build state
+        if: ${{ inputs.state_run != '' }}
+        run: |
+          zstd -dc "$RUNNER_TEMP/state/chromium-state.tar.zst" | tar -xpf - -C "$GITHUB_WORKSPACE"
+          rm -rf "$RUNNER_TEMP/state"
+          df -h /
+
+      # Official source tarballs are exported from a Linux checkout and lack every macOS-only
+      # dependency (google_toolbox_for_mac, angle-metal, dsymutil, mac Node, ...). A shallow
+      # gclient checkout with target_os=mac pulls exactly what DEPS pins for this platform.
+      - name: Fetch Chromium source (gclient, shallow)
+        if: ${{ inputs.state_run == '' }}
+        run: |
+          VERSION="${{ inputs.chromium_version }}"
+          export PATH="$RUNNER_TEMP/gn_bin:$RUNNER_TEMP/depot_tools:$PATH"
+          export DEPOT_TOOLS_UPDATE=0
+          mkdir -p chromium_src
+          cd chromium_src
+          # Node resolves module type from the nearest package.json; without this boundary
+          # Chromium's CommonJS build scripts inherit "type": "module" from the Lehko root.
+          echo '{ "type": "commonjs" }' > package.json
+          cat > .gclient <<'GCLIENT'
+          solutions = [{
+            "name": "src",
+            "url": "https://chromium.googlesource.com/chromium/src.git",
+            "managed": False,
+            "custom_deps": {},
+            "custom_vars": {},
+          }]
+          target_os = ["mac"]
+          GCLIENT
+          echo "Cloning chromium/src at tag $VERSION..."
+          git clone --depth 1 --branch "$VERSION" https://chromium.googlesource.com/chromium/src.git src
+          echo "Syncing pinned dependencies..."
+          gclient sync --no-history --shallow --nohooks -j 8
+          echo "Running gclient hooks (toolchains, lastchange, dsymutil, ...)..."
+          gclient runhooks
+
+          echo "Applying AV1 hardware fallback patch..."
+          cd src
+          patch -p1 -N < "$GITHUB_WORKSPACE/patches/01-disable-av1.patch" || true
+          df -h /
+
+      # Runs on resume too, so args.gn fixes pushed between runs take effect incrementally.
+      - name: Configure build (args.gn + gn gen)
+        if: ${{ inputs.stage == 1 }}
+        run: |
+          cd chromium_src/src
+          export PATH="$RUNNER_TEMP/gn_bin:$RUNNER_TEMP/depot_tools:$PATH"
+          mkdir -p out/Release
+          cmp -s "$GITHUB_WORKSPACE/patches/args.gn" out/Release/args.gn \
+            || cp "$GITHUB_WORKSPACE/patches/args.gn" out/Release/args.gn
+          gn gen out/Release
+
+      - name: Compile Chromium (ninja, time-boxed)
+        id: ninja
+        run: |
+          cd chromium_src/src
+          export PATH="$RUNNER_TEMP/gn_bin:$RUNNER_TEMP/depot_tools:$PATH"
+          DEADLINE=$(( JOB_START + NINJA_DEADLINE_MINUTES * 60 ))
+
+          # Returns 124 once the stage budget is spent; SIGINT lets ninja stop cleanly.
+          run_ninja() {
+            local left=$(( DEADLINE - $(date +%s) ))
+            if (( left < 120 )); then return 124; fi
+            echo "ninja $* (budget ${left}s)"
+            gtimeout -s INT -k 300 "$left" ninja -C out/Release "$@"
+          }
+
+          set +e
+          # Chromium 132 misses an ordering dep: components/language_detection includes
+          # metadata_schema_generated.h, produced only via tflite_support's private deps.
+          run_ninja third_party/tflite_support:metadata_schema && run_ninja chrome
+          rc=$?
+          # Retry once so any other generated-header race is picked up incrementally.
+          if (( rc != 0 && rc != 124 )); then
+            run_ninja chrome
+            rc=$?
+          fi
+          set -e
+
+          case $rc in
+            0)   outcome="done" ;;
+            124) outcome=timeout ;;
+            *)   outcome=failed ;;
+          esac
+          echo "ninja finished with rc=$rc ($outcome)"
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+
+      - name: Package Chromium.app
+        if: ${{ steps.ninja.outputs.outcome == 'done' }}
+        run: |
+          # tar keeps the framework symlinks and exec bits that artifact zips would drop.
+          tar -cf "$RUNNER_TEMP/chromium-app.tar" -C chromium_src/src/out/Release Chromium.app
+
+      - name: Upload Chromium.app
+        if: ${{ steps.ninja.outputs.outcome == 'done' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: chromium-app
+          path: ${{ runner.temp }}/chromium-app.tar
+          retention-days: 14
+
+      # A failed build saves its tree too, so a fix can resume from it via resume_from_run.
+      - name: Save build state
+        if: ${{ steps.ninja.outputs.outcome == 'timeout' || steps.ninja.outputs.outcome == 'failed' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/state"
+          tar -cf - -C "$GITHUB_WORKSPACE" chromium_src | zstd -T0 -1 -o "$RUNNER_TEMP/state/chromium-state.tar.zst"
+          # Free the tree before uploading so the archive and source never compete for disk.
+          rm -rf "$GITHUB_WORKSPACE/chromium_src"
+          ls -lh "$RUNNER_TEMP/state"
+
+      - name: Upload build state
+        if: ${{ steps.ninja.outputs.outcome == 'timeout' || steps.ninja.outputs.outcome == 'failed' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: chromium-state-${{ inputs.stage }}
+          path: ${{ runner.temp }}/state/chromium-state.tar.zst
+          compression-level: 0
+          retention-days: 5
+
+      - name: Report stage result
+        id: result
+        if: ${{ always() }}
+        run: |
+          outcome="${{ steps.ninja.outputs.outcome }}"
+          echo "done=$([[ "$outcome" == "done" ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          if [[ "$outcome" == failed ]]; then
+            echo "::error::ninja failed; state saved as chromium-state-${{ inputs.stage }}. Fix and rerun with resume_from_run=${{ github.run_id }}."
+            exit 1
+          fi
+          if [[ -z "$outcome" ]]; then
+            echo "::error::Stage did not reach ninja."
+            exit 1
+          fi
