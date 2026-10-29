@@ -1,13 +1,13 @@
 --- a/media/base/supported_types.cc
 +++ b/media/base/supported_types.cc
-@@ -210,6 +210,10 @@ bool IsDefaultSupportedVideoType(const VideoType& type) {
-   if (!IsColorSpaceSupported(type.color_space))
-     return false;
+@@ -282,7 +282,9 @@
  
-+  // Lehko: Force fallback to hardware-accelerated VP9/H.264 on Apple Silicon
-+  if (type.codec == VideoCodec::kAV1)
-+    return false;
-+
-   switch (type.codec) {
-     case VideoCodec::kAV1:
-       return false;
+ bool IsDecoderAV1Supported(const VideoType& type) {
+   // If the AV1 decoder is enabled, or if we're on Q or later, yes.
+-#if BUILDFLAG(ENABLE_AV1_DECODER)
++  // Lehko: Apple Silicon has no AV1 hardware decoder, so on macOS report AV1
++  // as unsupported and let sites such as YouTube pick hardware VP9/H.264.
++#if BUILDFLAG(ENABLE_AV1_DECODER) && !BUILDFLAG(IS_MAC)
+   return IsColorSpaceSupported(type.color_space);
+ #elif BUILDFLAG(IS_ANDROID)
+   return base::android::android_info::sdk_int() >=

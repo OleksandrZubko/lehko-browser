@@ -1,0 +1,36 @@
+name: Check Lehko patches
+
+# Minutes instead of a day: a sparse, blobless clone of only the files the patch series
+# touches, then git apply --check. Run it before dispatching a full Chromium build.
+
+on:
+  push:
+    paths: ['patches/**', 'ci/apply-patches.sh', '.github/workflows/check-patches.yml']
+  pull_request:
+    paths: ['patches/**', 'ci/apply-patches.sh', '.github/workflows/check-patches.yml']
+  workflow_dispatch:
+    inputs:
+      chromium_version:
+        description: 'Chromium tag to check against'
+        required: true
+        default: '156.0.8078.83'
+
+env:
+  CHROMIUM_VERSION: ${{ inputs.chromium_version || '156.0.8078.83' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sparse clone of the patched files
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse --branch "$CHROMIUM_VERSION" \
+            https://chromium.googlesource.com/chromium/src.git "$RUNNER_TEMP/src"
+          ci/apply-patches.sh --list | tee "$RUNNER_TEMP/files"
+          git -C "$RUNNER_TEMP/src" sparse-checkout set --no-cone --stdin < "$RUNNER_TEMP/files"
+
+      - name: git apply --check
+        run: ci/apply-patches.sh "$RUNNER_TEMP/src" --check

@@ -19,6 +19,8 @@ enable_nacl = false
 enable_media_router = false
 
 # Remove Google telemetry & client IDs
+# Without an API key Safe Browsing gets no list updates, so the build has no protection
+# against phishing/malware sites. Inject a key from a CI secret before daily use.
 google_api_key = ""
 google_default_client_id = ""
 google_default_client_secret = ""

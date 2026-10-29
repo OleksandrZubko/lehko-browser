@@ -1,0 +1,2 @@
+# Applied in order by ci/apply-patches.sh. One patch file per line; # starts a comment.
+01-disable-av1.patch

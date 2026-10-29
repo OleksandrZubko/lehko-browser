@@ -14,6 +14,10 @@ on:
       chromium_version:
         type: string
         required: true
+      apply_patches:
+        description: 'Apply patches/series; false builds unmodified Chromium as the baseline'
+        type: boolean
+        default: true
       state_run:
         description: 'Run ID holding the state to restore; empty starts from a fresh checkout'
         type: string
@@ -123,14 +127,17 @@ jobs:
           GCLIENT
           echo "Cloning chromium/src at tag $VERSION..."
           git clone --depth 1 --branch "$VERSION" https://chromium.googlesource.com/chromium/src.git src
+          # Right after the clone, before the long sync: a patch that no longer applies
+          # fails the job here instead of producing a day-long build without our change.
+          if [[ "${{ inputs.apply_patches }}" == "true" ]]; then
+            "$GITHUB_WORKSPACE/ci/apply-patches.sh" src
+          else
+            echo "apply_patches=false: building unmodified Chromium (baseline)"
+          fi
           echo "Syncing pinned dependencies..."
           gclient sync --no-history --shallow --nohooks -j 8
           echo "Running gclient hooks (toolchains, lastchange, dsymutil, ...)..."
           gclient runhooks
-
-          echo "Applying AV1 hardware fallback patch..."
-          cd src
-          patch -p1 -N < "$GITHUB_WORKSPACE/patches/01-disable-av1.patch" || true
           df -h /
 
       # Runs on resume too, so args.gn fixes pushed between runs take effect incrementally.
