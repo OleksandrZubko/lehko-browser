@@ -16,6 +16,27 @@ cp -R artifacts/Легко.app ~/Applications/
 
 Це запускач для встановленого Chrome Stable. Він не завантажує й не збирає Chromium, тому Chrome і далі сам оновлюється, а Safe Browsing лишається ввімкненим. Профіль окремий: `~/Library/Application Support/Lehko/Profile`. Перед кожним запуском, поки профіль закритий, запускач застосовує налаштування lean і оновлює копію розширення в `…/Lehko/extension`. Під час першого запуску відкривається `chrome://extensions`: один раз увімкніть Developer mode, натисніть Load unpacked і виберіть цю папку.
 
+## Легко Browser.app
+
+```sh
+# один раз: Chrome for Testing тієї ж версії, що й Chrome Stable
+mkdir -p artifacts/chrome-for-testing/156.0.8078.73
+curl -o /tmp/cft.zip https://storage.googleapis.com/chrome-for-testing-public/156.0.8078.73/mac-arm64/chrome-mac-arm64.zip
+ditto -x -k /tmp/cft.zip artifacts/chrome-for-testing/156.0.8078.73
+
+npm run build && node scripts/build-app.mjs --cft   # збирає artifacts/Легко Browser.app
+cp -R "artifacts/Легко Browser.app" ~/Applications/
+```
+
+Самостійний браузер без компіляції Chromium. Усередині — Chrome for Testing, клонований на APFS, тому він не займає додаткового місця. Chrome for Testing досі приймає `--load-extension`, тож «Легко» вбудований одразу, без Developer mode. Профіль: `~/Library/Application Support/Lehko/Browser`. Налаштування lean застосовуються так само, як у Легко.app. Інший шлях до Chrome for Testing: `--cft <шлях до .app>`.
+
+Обмеження:
+
+- Chrome for Testing не оновлюється сам. Застосунок треба перезбирати на кожен stable-реліз.
+- Safe Browsing у цій збірці не перевірено.
+- ID розширення відрізняється від того, що в Легко.app, тому налаштування «Легко» в них окремі.
+- Патчі з `patches/` тут не застосовані: для них потрібна збірка Chromium у CI.
+
 ## Профіль `lean`
 
 ```sh
