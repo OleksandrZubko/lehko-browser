@@ -1,0 +1,86 @@
+name: Package Lehko (ungoogled-chromium, macOS arm64)
+
+# Fast lane: wraps a notarized ungoogled-chromium release with the Легко extension, lean prefs
+# and lean flags into a DMG in minutes, instead of building Chromium for a day.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ungoogled_tag:
+        description: 'ungoogled-chromium-macos release tag (empty = latest)'
+        required: false
+        default: ''
+      create_release:
+        description: 'Publish as GitHub Release'
+        type: boolean
+        required: true
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Build Легко extension
+        run: |
+          npm ci
+          npm run build
+
+      - name: Download ungoogled-chromium
+        id: browser
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ungoogled-software/ungoogled-chromium-macos
+        run: |
+          TAG="${{ inputs.ungoogled_tag }}"
+          [[ -n "$TAG" ]] || TAG=$(gh release view --repo "$REPO" --json tagName -q .tagName)
+          mkdir -p "$RUNNER_TEMP/ug"
+          gh release download "$TAG" --repo "$REPO" --pattern '*_arm64-macos.dmg' --dir "$RUNNER_TEMP/ug"
+          shasum -a 256 "$RUNNER_TEMP"/ug/*.dmg
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/ug/mnt" "$RUNNER_TEMP"/ug/*.dmg
+          ditto "$RUNNER_TEMP/ug/mnt/Chromium.app" "$RUNNER_TEMP/ug/Chromium.app"
+          hdiutil detach "$RUNNER_TEMP/ug/mnt"
+          # Fails the job if the release is not notarized by its usual Developer ID.
+          spctl -a -vv -t install "$RUNNER_TEMP/ug/Chromium.app"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$(plutil -extract version raw dist/manifest.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Package DMG
+        run: ./ci/package-dmg.sh "$RUNNER_TEMP/ug/Chromium.app" Lehko-arm64.dmg dist
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lehko-arm64-dmg
+          path: Lehko-arm64.dmg
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        if: ${{ inputs.create_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.browser.outputs.version }}-ungoogled-${{ steps.browser.outputs.tag }}"
+          name: "Легко ${{ steps.browser.outputs.version }} (ungoogled-chromium ${{ steps.browser.outputs.tag }}, Apple Silicon)"
+          body: |
+            ## Легко ${{ steps.browser.outputs.version }} для Apple Silicon
+            - **Основа:** нотаризований [ungoogled-chromium ${{ steps.browser.outputs.tag }}](https://github.com/ungoogled-software/ungoogled-chromium-macos/releases/tag/${{ steps.browser.outputs.tag }}) без змін, з H.264 і без сервісів Google.
+            - **Вбудоване розширення «Легко»:** блокування реклами й трекерів, папки вкладок, вивантаження фонових вкладок, вимкнення AV1 на YouTube.
+            - **Профіль lean:** Memory Saver «Максимальне», Energy Saver від батареї, без передзавантаження сторінок і фонових служб.
+
+            **Встановлення:** перетягніть «Легко» у «Програми» і запускайте звідти, не з образу диска. Під час першого запуску macOS попросить дозволу: «Системні параметри → Конфіденційність і безпека → Усе одно відкрити». Профіль лежить у `~/Library/Application Support/Lehko Browser`.
+          files: Lehko-arm64.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

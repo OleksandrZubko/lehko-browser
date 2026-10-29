@@ -7,6 +7,18 @@
 
 Власну збірку Chromium відкладено до перевірки виграшу.
 
+## DMG на основі ungoogled-chromium
+
+Workflow `Package Lehko` бере нотаризований реліз [ungoogled-chromium для macOS](https://github.com/ungoogled-software/ungoogled-chromium-macos), вбудовує розширення, налаштування й прапорці lean і за кілька хвилин публікує `Lehko-arm64.dmg`. Сам Chromium лишається без змін і зберігає свій підпис. `Легко.app` лише запускає його з профілем `~/Library/Application Support/Lehko Browser`.
+
+```sh
+gh workflow run package-lehko.yml                                  # останній реліз ungoogled-chromium
+gh workflow run package-lehko.yml -f ungoogled_tag=156.0.8078.47-1.1
+./ci/package-dmg.sh path/to/Chromium.app Lehko-arm64.dmg dist     # локально, після npm run build
+```
+
+Запускайте «Легко» з «Програм», а не з образу диска: Chromium, запущений з DMG, зупиняється на пропозиції встановити себе.
+
 ## Легко.app
 
 ```sh
