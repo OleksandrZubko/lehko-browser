@@ -3,7 +3,7 @@
 # Bakes in the extension, initial lean preferences, and memory-saving launch flags
 set -euo pipefail
 
-SRC_APP="${1:-chromium_src/out/Release/Chromium.app}"
+SRC_APP="${1:-chromium_src/src/out/Release/Chromium.app}"
 OUTPUT_DMG="${2:-Lehko-arm64.dmg}"
 EXT_DIR="${3:-dist}"
 

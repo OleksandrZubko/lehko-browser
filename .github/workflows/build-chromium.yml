@@ -56,57 +56,60 @@ jobs:
           export PATH="$RUNNER_TEMP/gn_bin:$PATH"
           "$RUNNER_TEMP/gn_bin/gn" --version
 
-      - name: Download Chromium source tarball
+      # Official source tarballs are exported from a Linux checkout and lack every macOS-only
+      # dependency (google_toolbox_for_mac, angle-metal, dsymutil, mac Node, ...). A shallow
+      # gclient checkout with target_os=mac pulls exactly what DEPS pins for this platform.
+      - name: Fetch Chromium source (gclient, shallow)
         run: |
           VERSION="${{ github.event.inputs.chromium_version }}"
-          echo "Downloading Chromium $VERSION..."
-          mkdir -p chromium_src
-          curl -fSL "https://commondatastorage.googleapis.com/chromium-browser-official/chromium-${VERSION}.tar.xz" -o chromium.tar.xz
-          echo "Extracting tarball (this may take a few minutes)..."
-          tar -xf chromium.tar.xz -C chromium_src --strip-components=1
-          rm -f chromium.tar.xz
-          echo "Extracted source tree successfully."
-
-      - name: Setup Clang Toolchain and Apply Lehko Patches
-        run: |
-          cd chromium_src
           export PATH="$RUNNER_TEMP/gn_bin:$RUNNER_TEMP/depot_tools:$PATH"
+          export DEPOT_TOOLS_UPDATE=0
+          mkdir -p chromium_src
+          cd chromium_src
+          cat > .gclient <<'GCLIENT'
+          solutions = [{
+            "name": "src",
+            "url": "https://chromium.googlesource.com/chromium/src.git",
+            "managed": False,
+            "custom_deps": {},
+            "custom_vars": {},
+          }]
+          target_os = ["mac"]
+          GCLIENT
+          echo "Cloning chromium/src at tag $VERSION..."
+          git clone --depth 1 --branch "$VERSION" https://chromium.googlesource.com/chromium/src.git src
+          echo "Syncing pinned dependencies..."
+          gclient sync --no-history --shallow --nohooks -j 8
+          echo "Running gclient hooks (toolchains, lastchange, dsymutil, ...)..."
+          gclient runhooks
+          df -h /
 
-          echo "Fetching Chromium pinned Clang compiler..."
-          python3 tools/clang/scripts/update.py
-
-          echo "Fetching Chromium pinned Rust toolchain..."
-          python3 tools/rust/update_rust.py
-
-          # The tarball is exported from a Linux checkout, so the macOS Node binary that
-          # gclient hooks normally download is missing; point Chromium at the runner's Node.
-          echo "Linking runner Node.js into third_party/node..."
-          mkdir -p third_party/node/mac_arm64/node-darwin-arm64/bin
-          ln -sf "$(command -v node)" third_party/node/mac_arm64/node-darwin-arm64/bin/node
-          third_party/node/mac_arm64/node-darwin-arm64/bin/node --version
+      - name: Apply Lehko Patches
+        run: |
+          cd chromium_src/src
 
           echo "Applying AV1 hardware fallback patch..."
-          patch -p1 < ../patches/01-disable-av1.patch || true
+          patch -p1 < "$GITHUB_WORKSPACE/patches/01-disable-av1.patch" || true
 
           echo "Setting up Lean GN arguments..."
           mkdir -p out/Release
-          cp ../patches/args.gn out/Release/args.gn
+          cp "$GITHUB_WORKSPACE/patches/args.gn" out/Release/args.gn
 
       - name: Generate build files (gn gen)
         run: |
-          cd chromium_src
+          cd chromium_src/src
           export PATH="$RUNNER_TEMP/gn_bin:$RUNNER_TEMP/depot_tools:$PATH"
           gn gen out/Release
 
       - name: Compile Chromium (ninja)
         run: |
-          cd chromium_src
+          cd chromium_src/src
           export PATH="$RUNNER_TEMP/gn_bin:$RUNNER_TEMP/depot_tools:$PATH"
           ninja -C out/Release chrome
 
       - name: Package DMG Installer with Embedded Modules
         run: |
-          ./ci/package-dmg.sh chromium_src/out/Release/Chromium.app Lehko-arm64.dmg dist
+          ./ci/package-dmg.sh chromium_src/src/out/Release/Chromium.app Lehko-arm64.dmg dist
 
       - name: Upload DMG Artifact
         uses: actions/upload-artifact@v4
