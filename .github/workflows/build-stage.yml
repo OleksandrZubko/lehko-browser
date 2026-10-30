@@ -142,9 +142,14 @@ jobs:
           gclient runhooks
           df -h /
 
+      - name: Apply patches (new or pending)
+        if: ${{ inputs.apply_patches }}
+        run: |
+          "$GITHUB_WORKSPACE/ci/apply-patches.sh" chromium_src/src
+
       # Runs on resume too, so args.gn fixes pushed between runs take effect incrementally.
       - name: Configure build (args.gn + gn gen)
-        if: ${{ inputs.stage == 1 }}
+        if: ${{ inputs.stage == 1 || inputs.state_run != '' }}
         run: |
           cd chromium_src/src
           export PATH="$RUNNER_TEMP/gn_bin:$RUNNER_TEMP/depot_tools:$PATH"

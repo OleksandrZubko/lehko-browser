@@ -1,0 +1,620 @@
+diff --git a/chrome/browser/ui/views/location_bar/BUILD.gn b/chrome/browser/ui/views/location_bar/BUILD.gn
+index 7e22df23..8be9c0b8 100644
+--- a/chrome/browser/ui/views/location_bar/BUILD.gn
++++ b/chrome/browser/ui/views/location_bar/BUILD.gn
+@@ -15,6 +15,7 @@ source_set("location_bar") {
+     public += [
+       "content_setting_image_view.h",
+       "custom_tab_bar_view.h",
++      "folder_picker_view.h",
+       "lens_overlay_homework_page_action_controller.h",
+       "location_bar_bubble_delegate_view.h",
+       "location_bar_layout.h",
+@@ -90,6 +91,7 @@ source_set("impl") {
+     sources += [
+       "content_setting_image_view.cc",
+       "custom_tab_bar_view.cc",
++      "folder_picker_view.cc",
+       "lens_overlay_homework_page_action_controller.cc",
+       "location_bar_actions.cc",
+       "location_bar_bubble_delegate_view.cc",
+@@ -113,6 +115,7 @@ source_set("impl") {
+     deps += [
+       "//chrome/app:generated_resources",
+       "//chrome/app/vector_icons",
++      "//components/vector_icons",
+       "//chrome/browser:primitives",
+       "//chrome/browser/actor/ui",
+       "//chrome/browser/autocomplete",
+diff --git a/chrome/browser/ui/views/location_bar/folder_picker_view.cc b/chrome/browser/ui/views/location_bar/folder_picker_view.cc
+new file mode 100644
+index 00000000..bac8c408
+--- /dev/null
++++ b/chrome/browser/ui/views/location_bar/folder_picker_view.cc
+@@ -0,0 +1,425 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/ui/views/location_bar/folder_picker_view.h"
++
++#include <algorithm>
++
++#include "base/files/file_util.h"
++#include "base/files/important_file_writer.h"
++#include "base/functional/bind.h"
++#include "base/json/json_reader.h"
++#include "base/json/json_writer.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/strings/utf_string_conversions.h"
++#include "base/time/time.h"
++#include "base/values.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "components/vector_icons/vector_icons.h"
++#include "content/public/browser/web_contents.h"
++#include "ui/base/metadata/metadata_impl_macros.h"
++#include "ui/base/models/image_model.h"
++#include "ui/color/color_id.h"
++
++namespace {
++
++constexpr int kCommandFolderBase = 1000;
++constexpr int kCommandMoveToBase = 2000;
++constexpr int kCommandNewFolder = 3001;
++constexpr int kCommandDeleteFolder = 3002;
++constexpr int kCommandMoveSubmenu = 3003;
++
++}  // namespace
++
++FolderPickerView::FolderPickerView(
++    const gfx::FontList& font_list,
++    IconLabelBubbleView::Delegate* parent_delegate,
++    BrowserWindowInterface* browser,
++    Profile* profile)
++    : IconLabelBubbleView(font_list, parent_delegate),
++      browser_(browser),
++      profile_(profile) {
++  SetImageModel(ui::ImageModel::FromVectorIcon(
++      vector_icons::kFolderOpenIcon, ui::kColorIcon, 16));
++  SetBackgroundVisibility(BackgroundVisibility::kAlways);
++  SetCallback(base::BindRepeating(&FolderPickerView::OnButtonPressed,
++                                  base::Unretained(this)));
++  LoadFoldersFromDisk();
++  Update();
++}
++
++FolderPickerView::~FolderPickerView() {
++  SaveCurrentFolderTabs();
++}
++
++void FolderPickerView::LoadFoldersFromDisk() {
++  if (!profile_) {
++    return;
++  }
++  base::FilePath path = profile_->GetPath().AppendASCII("lehko_folders.json");
++  std::string json_data;
++  if (!base::ReadFileToString(path, &json_data)) {
++    FolderItem default_folder;
++    default_folder.id = "main";
++    default_folder.name = "Основна";
++    folders_.push_back(default_folder);
++    active_folder_id_ = "main";
++    SaveFoldersToDisk();
++    return;
++  }
++
++  auto parsed = base::JSONReader::Read(json_data);
++  if (!parsed || !parsed->is_dict()) {
++    FolderItem default_folder;
++    default_folder.id = "main";
++    default_folder.name = "Основна";
++    folders_.push_back(default_folder);
++    active_folder_id_ = "main";
++    SaveFoldersToDisk();
++    return;
++  }
++
++  const base::Value::Dict& root = parsed->GetDict();
++  if (const std::string* active_id = root.FindString("active_id")) {
++    active_folder_id_ = *active_id;
++  } else {
++    active_folder_id_ = "main";
++  }
++
++  folders_.clear();
++  if (const base::Value::List* list = root.FindList("folders")) {
++    for (const auto& item_val : *list) {
++      if (!item_val.is_dict()) {
++        continue;
++      }
++      const base::Value::Dict& f_dict = item_val.GetDict();
++      FolderItem folder;
++      if (const std::string* id = f_dict.FindString("id")) {
++        folder.id = *id;
++      }
++      if (const std::string* name = f_dict.FindString("name")) {
++        folder.name = *name;
++      }
++      if (const base::Value::List* tabs_list = f_dict.FindList("tabs")) {
++        for (const auto& t_val : *tabs_list) {
++          if (!t_val.is_dict()) {
++            continue;
++          }
++          const base::Value::Dict& t_dict = t_val.GetDict();
++          FolderTabEntry entry;
++          if (const std::string* url = t_dict.FindString("url")) {
++            entry.url = GURL(*url);
++          }
++          if (const std::string* title = t_dict.FindString("title")) {
++            entry.title = base::UTF8ToUTF16(*title);
++          }
++          if (entry.url.is_valid()) {
++            folder.tabs.push_back(entry);
++          }
++        }
++      }
++      folders_.push_back(folder);
++    }
++  }
++
++  if (folders_.empty()) {
++    FolderItem default_folder;
++    default_folder.id = "main";
++    default_folder.name = "Основна";
++    folders_.push_back(default_folder);
++    active_folder_id_ = "main";
++  }
++}
++
++void FolderPickerView::SaveFoldersToDisk() {
++  if (!profile_) {
++    return;
++  }
++  base::Value::Dict root;
++  root.Set("active_id", active_folder_id_);
++  base::Value::List list;
++  for (const auto& folder : folders_) {
++    base::Value::Dict f_dict;
++    f_dict.Set("id", folder.id);
++    f_dict.Set("name", folder.name);
++    base::Value::List tabs_list;
++    for (const auto& tab : folder.tabs) {
++      base::Value::Dict t_dict;
++      t_dict.Set("url", tab.url.spec());
++      t_dict.Set("title", base::UTF16ToUTF8(tab.title));
++      tabs_list.Append(std::move(t_dict));
++    }
++    f_dict.Set("tabs", std::move(tabs_list));
++    list.Append(std::move(f_dict));
++  }
++  root.Set("folders", std::move(list));
++
++  std::string json_str;
++  if (base::JSONWriter::WriteWithOptions(
++          root, base::JSONWriter::OPTIONS_PRETTY_PRINT, &json_str)) {
++    base::ImportantFileWriter::WriteFileAtomically(
++        profile_->GetPath().AppendASCII("lehko_folders.json"), json_str);
++  }
++}
++
++void FolderPickerView::SaveCurrentFolderTabs() {
++  if (!browser_) {
++    return;
++  }
++  TabStripModel* tab_strip = browser_->GetTabStripModel();
++  if (!tab_strip) {
++    return;
++  }
++
++  auto it = std::find_if(
++      folders_.begin(), folders_.end(),
++      [this](const FolderItem& f) { return f.id == active_folder_id_; });
++  if (it == folders_.end()) {
++    return;
++  }
++
++  it->tabs.clear();
++  for (int i = 0; i < tab_strip->count(); ++i) {
++    if (tab_strip->IsTabPinned(i)) {
++      continue;
++    }
++    content::WebContents* contents = tab_strip->GetWebContentsAt(i);
++    if (!contents) {
++      continue;
++    }
++    GURL url = contents->GetVisibleURL();
++    if (!url.is_valid() || url.spec().empty() || url.spec() == "about:blank") {
++      url = contents->GetLastCommittedURL();
++    }
++    if (!url.is_valid() || url.spec().empty()) {
++      url = GURL("chrome://newtab/");
++    }
++    std::u16string title = contents->GetTitle();
++    it->tabs.push_back({url, title});
++  }
++  SaveFoldersToDisk();
++}
++
++void FolderPickerView::Update() {
++  auto it = std::find_if(
++      folders_.begin(), folders_.end(),
++      [this](const FolderItem& f) { return f.id == active_folder_id_; });
++  std::string name = (it != folders_.end()) ? it->name : "Основна";
++  SetLabel(base::UTF8ToUTF16(name));
++  SetTooltipText(base::UTF8ToUTF16("Папка: " + name));
++  SetVisible(true);
++  ResetSlideAnimation(true);
++}
++
++void FolderPickerView::OnButtonPressed() {
++  menu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
++
++  for (size_t i = 0; i < folders_.size(); ++i) {
++    int cmd = kCommandFolderBase + static_cast<int>(i);
++    std::string prefix = (folders_[i].id == active_folder_id_) ? "✓ " : "   ";
++    std::string count_str =
++        " (" + base::NumberToString(folders_[i].tabs.size()) + ")";
++    std::string label = prefix + folders_[i].name + count_str;
++    menu_model_->AddItem(cmd, base::UTF8ToUTF16(label));
++  }
++
++  menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
++  menu_model_->AddItem(kCommandNewFolder, base::UTF8ToUTF16("+ Нова папка"));
++
++  if (folders_.size() > 1) {
++    move_submenu_model_ = std::make_unique<ui::SimpleMenuModel>(this);
++    for (size_t i = 0; i < folders_.size(); ++i) {
++      if (folders_[i].id == active_folder_id_) {
++        continue;
++      }
++      int cmd = kCommandMoveToBase + static_cast<int>(i);
++      move_submenu_model_->AddItem(cmd, base::UTF8ToUTF16(folders_[i].name));
++    }
++    menu_model_->AddSubMenu(kCommandMoveSubmenu,
++                            base::UTF8ToUTF16("Перенести активну вкладку до…"),
++                            move_submenu_model_.get());
++
++    menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
++    menu_model_->AddItem(kCommandDeleteFolder,
++                         base::UTF8ToUTF16("Видалити поточну папку"));
++  }
++
++  menu_runner_ = std::make_unique<views::MenuRunner>(
++      menu_model_.get(),
++      views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::COMBOBOX);
++
++  gfx::Rect anchor_bounds = GetBoundsInScreen();
++  menu_runner_->RunMenuAt(GetWidget(), nullptr, anchor_bounds,
++                          views::MenuAnchorPosition::kTopLeft,
++                          ui::mojom::MenuSourceType::kNone);
++}
++
++void FolderPickerView::ExecuteCommand(int command_id, int event_flags) {
++  if (command_id >= kCommandFolderBase &&
++      command_id < kCommandFolderBase + static_cast<int>(folders_.size())) {
++    size_t target_idx = static_cast<size_t>(command_id - kCommandFolderBase);
++    SwitchToFolder(target_idx);
++  } else if (command_id >= kCommandMoveToBase &&
++             command_id <
++                 kCommandMoveToBase + static_cast<int>(folders_.size())) {
++    size_t target_idx = static_cast<size_t>(command_id - kCommandMoveToBase);
++    MoveActiveTabToFolder(target_idx);
++  } else if (command_id == kCommandNewFolder) {
++    CreateNewFolder();
++  } else if (command_id == kCommandDeleteFolder) {
++    DeleteCurrentFolder();
++  }
++}
++
++bool FolderPickerView::IsCommandIdChecked(int command_id) const {
++  if (command_id >= kCommandFolderBase &&
++      command_id < kCommandFolderBase + static_cast<int>(folders_.size())) {
++    size_t idx = static_cast<size_t>(command_id - kCommandFolderBase);
++    return folders_[idx].id == active_folder_id_;
++  }
++  return false;
++}
++
++bool FolderPickerView::IsCommandIdEnabled(int command_id) const {
++  if (command_id == kCommandDeleteFolder) {
++    return folders_.size() > 1;
++  }
++  return true;
++}
++
++void FolderPickerView::SwitchToFolder(size_t target_index) {
++  if (target_index >= folders_.size()) {
++    return;
++  }
++  if (folders_[target_index].id == active_folder_id_) {
++    return;
++  }
++
++  SaveCurrentFolderTabs();
++
++  TabStripModel* tab_strip = browser_ ? browser_->GetTabStripModel() : nullptr;
++  if (!tab_strip) {
++    return;
++  }
++
++  std::vector<int> tabs_to_close;
++  for (int i = 0; i < tab_strip->count(); ++i) {
++    if (!tab_strip->IsTabPinned(i)) {
++      tabs_to_close.push_back(i);
++    }
++  }
++
++  active_folder_id_ = folders_[target_index].id;
++  SaveFoldersToDisk();
++
++  const auto& target_tabs = folders_[target_index].tabs;
++  if (target_tabs.empty()) {
++    browser_->OpenGURL(GURL("chrome://newtab/"),
++                      WindowOpenDisposition::NEW_FOREGROUND_TAB);
++  } else {
++    for (size_t i = 0; i < target_tabs.size(); ++i) {
++      WindowOpenDisposition disp = (i == 0)
++                                       ? WindowOpenDisposition::NEW_FOREGROUND_TAB
++                                       : WindowOpenDisposition::NEW_BACKGROUND_TAB;
++      browser_->OpenGURL(target_tabs[i].url, disp);
++    }
++  }
++
++  for (auto it = tabs_to_close.rbegin(); it != tabs_to_close.rend(); ++it) {
++    tab_strip->CloseWebContentsAt(*it, TabCloseTypes::CLOSE_USER_GESTURE);
++  }
++
++  Update();
++}
++
++void FolderPickerView::CreateNewFolder() {
++  SaveCurrentFolderTabs();
++  size_t num = folders_.size() + 1;
++  std::string name = "Папка " + base::NumberToString(num);
++  std::string id =
++      base::NumberToString(base::Time::Now().InMillisecondsSinceUnixEpoch());
++  FolderItem new_f;
++  new_f.id = id;
++  new_f.name = name;
++  new_f.tabs.push_back({GURL("chrome://newtab/"), u"Нова вкладка"});
++  folders_.push_back(new_f);
++  SaveFoldersToDisk();
++  SwitchToFolder(folders_.size() - 1);
++}
++
++void FolderPickerView::MoveActiveTabToFolder(size_t target_index) {
++  if (target_index >= folders_.size()) {
++    return;
++  }
++  TabStripModel* tab_strip = browser_ ? browser_->GetTabStripModel() : nullptr;
++  if (!tab_strip) {
++    return;
++  }
++  int active_idx = tab_strip->active_index();
++  if (active_idx < 0 || tab_strip->IsTabPinned(active_idx)) {
++    return;
++  }
++
++  content::WebContents* contents = tab_strip->GetWebContentsAt(active_idx);
++  if (!contents) {
++    return;
++  }
++
++  GURL url = contents->GetVisibleURL();
++  if (!url.is_valid()) {
++    url = contents->GetLastCommittedURL();
++  }
++  if (!url.is_valid()) {
++    url = GURL("chrome://newtab/");
++  }
++  std::u16string title = contents->GetTitle();
++
++  folders_[target_index].tabs.push_back({url, title});
++
++  int non_pinned_count = 0;
++  for (int i = 0; i < tab_strip->count(); ++i) {
++    if (!tab_strip->IsTabPinned(i)) {
++      non_pinned_count++;
++    }
++  }
++  if (non_pinned_count <= 1) {
++    browser_->OpenGURL(GURL("chrome://newtab/"),
++                      WindowOpenDisposition::NEW_FOREGROUND_TAB);
++  }
++
++  tab_strip->CloseWebContentsAt(active_idx, TabCloseTypes::CLOSE_USER_GESTURE);
++  SaveCurrentFolderTabs();
++  Update();
++}
++
++void FolderPickerView::DeleteCurrentFolder() {
++  if (folders_.size() <= 1) {
++    return;
++  }
++  auto it = std::find_if(
++      folders_.begin(), folders_.end(),
++      [this](const FolderItem& f) { return f.id == active_folder_id_; });
++  if (it == folders_.end()) {
++    return;
++  }
++  size_t cur_idx = std::distance(folders_.begin(), it);
++  size_t next_idx = (cur_idx == 0) ? 1 : (cur_idx - 1);
++  std::string next_id = folders_[next_idx].id;
++  folders_.erase(it);
++  active_folder_id_ = next_id;
++  SaveFoldersToDisk();
++
++  auto next_it = std::find_if(
++      folders_.begin(), folders_.end(),
++      [this](const FolderItem& f) { return f.id == active_folder_id_; });
++  if (next_it != folders_.end()) {
++    size_t target_idx = std::distance(folders_.begin(), next_it);
++    SwitchToFolder(target_idx);
++  }
++}
++
++BEGIN_METADATA(FolderPickerView)
++END_METADATA
+diff --git a/chrome/browser/ui/views/location_bar/folder_picker_view.h b/chrome/browser/ui/views/location_bar/folder_picker_view.h
+new file mode 100644
+index 00000000..695569c4
+--- /dev/null
++++ b/chrome/browser/ui/views/location_bar/folder_picker_view.h
+@@ -0,0 +1,77 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_FOLDER_PICKER_VIEW_H_
++#define CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_FOLDER_PICKER_VIEW_H_
++
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "base/memory/raw_ptr.h"
++#include "chrome/browser/ui/views/location_bar/icon_label_bubble_view.h"
++#include "ui/base/metadata/metadata_header_macros.h"
++#include "ui/base/models/simple_menu_model.h"
++#include "ui/views/controls/menu/menu_runner.h"
++#include "url/gurl.h"
++
++class BrowserWindowInterface;
++class Profile;
++
++struct FolderTabEntry {
++  GURL url;
++  std::u16string title;
++};
++
++struct FolderItem {
++  std::string id;
++  std::string name;
++  std::vector<FolderTabEntry> tabs;
++};
++
++// FolderPickerView displays a clickable folder icon and label on the leading
++// (left) side of the location bar, allowing users to switch between tab folders.
++class FolderPickerView : public IconLabelBubbleView,
++                         public ui::SimpleMenuModel::Delegate {
++  METADATA_HEADER(FolderPickerView, IconLabelBubbleView)
++
++ public:
++  FolderPickerView(const gfx::FontList& font_list,
++                   IconLabelBubbleView::Delegate* parent_delegate,
++                   BrowserWindowInterface* browser,
++                   Profile* profile);
++  FolderPickerView(const FolderPickerView&) = delete;
++  FolderPickerView& operator=(const FolderPickerView&) = delete;
++  ~FolderPickerView() override;
++
++  void Update();
++
++  // ui::SimpleMenuModel::Delegate:
++  void ExecuteCommand(int command_id, int event_flags) override;
++  bool IsCommandIdChecked(int command_id) const override;
++  bool IsCommandIdEnabled(int command_id) const override;
++
++ private:
++  void OnButtonPressed();
++  void SwitchToFolder(size_t target_index);
++  void CreateNewFolder();
++  void MoveActiveTabToFolder(size_t target_index);
++  void DeleteCurrentFolder();
++
++  void LoadFoldersFromDisk();
++  void SaveFoldersToDisk();
++  void SaveCurrentFolderTabs();
++
++  raw_ptr<BrowserWindowInterface> browser_ = nullptr;
++  raw_ptr<Profile> profile_ = nullptr;
++
++  std::vector<FolderItem> folders_;
++  std::string active_folder_id_;
++
++  std::unique_ptr<ui::SimpleMenuModel> menu_model_;
++  std::unique_ptr<ui::SimpleMenuModel> move_submenu_model_;
++  std::unique_ptr<views::MenuRunner> menu_runner_;
++};
++
++#endif  // CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_FOLDER_PICKER_VIEW_H_
+diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.cc b/chrome/browser/ui/views/location_bar/location_bar_view.cc
+index bac174d0..891751e8 100644
+--- a/chrome/browser/ui/views/location_bar/location_bar_view.cc
++++ b/chrome/browser/ui/views/location_bar/location_bar_view.cc
+@@ -62,6 +62,7 @@
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/location_bar/content_setting_image_view.h"
+ #include "chrome/browser/ui/views/location_bar/location_bar_actions.h"
++#include "chrome/browser/ui/views/location_bar/folder_picker_view.h"
+ #include "chrome/browser/ui/views/location_bar/location_bar_layout.h"
+ #include "chrome/browser/ui/views/location_bar/location_bar_util.h"
+ #include "chrome/browser/ui/views/location_bar/location_icon_state_helper.h"
+@@ -344,6 +345,10 @@ void LocationBarView::Init() {
+   location_icon_view->set_drag_controller(this);
+   location_icon_view_ = AddChildView(std::move(location_icon_view));
+ 
++  auto folder_picker_view =
++      std::make_unique<FolderPickerView>(omnibox_chip_font_list, this, browser_, profile_);
++  folder_picker_view_ = AddChildView(std::move(folder_picker_view));
++
+   // Initialize the Omnibox view. browser_ can be nullptr on ChromeOS in the
+   // case of simple_web_view_dialog. Or it can be nulltpr on ChromeOS and on
+   // other desktop platforms in the case of presentation_receiver_window_view.
+@@ -843,6 +848,13 @@ void LocationBarView::Layout(PassKey) {
+   // label/chip.
+   const double kLeadingDecorationMaxFraction = 0.5;
+ 
++  if (folder_picker_view_ && folder_picker_view_->GetVisible()) {
++    leading_decorations.AddDecoration(vertical_padding, location_height,
++                                      /*auto_collapse=*/false, /*max_fraction=*/0,
++                                      /*intra_item_padding=*/4, icon_left,
++                                      folder_picker_view_);
++  }
++
+   const bool show_overriding_permission_chip =
+       base::FeatureList::IsEnabled(
+           content_settings::features::kLeftHandSideActivityIndicators)
+@@ -1068,6 +1080,10 @@ void LocationBarView::Update(WebContents* contents) {
+   location_icon_view_->Update(
+       /*suppress_animations=*/contents, GetOmniboxController()->IsPopupOpen());
+ 
++  if (folder_picker_view_) {
++    folder_picker_view_->Update();
++  }
++
+   if (contents) {
+     omnibox_view_->OnTabChanged(contents);
+     if (is_full_webui_omnibox_ &&
+diff --git a/chrome/browser/ui/views/location_bar/location_bar_view.h b/chrome/browser/ui/views/location_bar/location_bar_view.h
+index 05979cd1..290a9c31 100644
+--- a/chrome/browser/ui/views/location_bar/location_bar_view.h
++++ b/chrome/browser/ui/views/location_bar/location_bar_view.h
+@@ -54,6 +54,7 @@
+ 
+ class BrowserWindowInterface;
+ class CommandUpdater;
++class FolderPickerView;
+ class ContentSettingBubbleModelDelegate;
+ class OmniboxController;
+ class OmniboxContextMenu;
+@@ -178,6 +179,7 @@ class LocationBarView
+   virtual void SelectAll();
+ 
+   LocationIconView* location_icon_view() { return location_icon_view_; }
++  FolderPickerView* folder_picker_view() { return folder_picker_view_; }
+ 
+   SelectedKeywordView* selected_keyword_view() {
+     return selected_keyword_view_;
+@@ -564,6 +566,9 @@ class LocationBarView
+   // search icon, EV HTTPS bubble, etc.
+   raw_ptr<LocationIconView> location_icon_view_ = nullptr;
+ 
++  // Lehko: Folder picker dropdown on the leading side of the Omnibox.
++  raw_ptr<FolderPickerView> folder_picker_view_ = nullptr;
++
+   // Views to show inline autocompletion when an IME is active.  In this case,
+   // we shouldn't change the text or selection inside the OmniboxView itself,
+   // since this will conflict with the IME's control over the text.  So instead

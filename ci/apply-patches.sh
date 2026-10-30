@@ -27,10 +27,19 @@ cd "$SRC"
 
 for p in "${PATCHES[@]}"; do
   echo "Checking $p..."
-  git apply --check -p1 "$PATCH_DIR/$p"
-  if [[ "$MODE" != "--check" ]]; then
-    git apply -p1 "$PATCH_DIR/$p"
-    echo "Applied $p"
+  if git apply --check -p1 "$PATCH_DIR/$p" 2>/dev/null; then
+    if [[ "$MODE" != "--check" ]]; then
+      git apply -p1 "$PATCH_DIR/$p"
+      echo "Applied $p"
+    else
+      echo "Can apply $p"
+    fi
+  elif git apply --reverse --check -p1 "$PATCH_DIR/$p" 2>/dev/null; then
+    echo "Already applied $p"
+  else
+    echo "Failed to check or apply $p:"
+    git apply --check -p1 "$PATCH_DIR/$p"
+    exit 1
   fi
 done
 echo "${#PATCHES[@]} patch(es) OK"
