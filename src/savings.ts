@@ -6,6 +6,9 @@ export const RULESETS = ['ads', 'privacy', 'frames'] as const;
 export type Ruleset = (typeof RULESETS)[number];
 export const VIDEO_MATCHES = ['*://*.youtube.com/*', '*://*.youtube-nocookie.com/*'];
 const AV1_SCRIPT = 'no-av1';
+// Element hiding for empty ad slots needs access to every site; it follows the ads ruleset.
+export const COSMETIC_MATCHES = ['*://*/*'];
+const COSMETIC_SCRIPT = 'cosmetic';
 // Above every static rule, so a paused site loads everything.
 const PAUSE_PRIORITY = 100;
 
@@ -13,13 +16,14 @@ export interface SavingsSettings {
   rulesets: Record<Ruleset, boolean>;
   pausedHosts: string[];
   noAv1: boolean;
+  cosmetic: boolean;
   devSet: string[];
   devActive: boolean;
   qaBypass: boolean;
   qaHosts: string[];
 }
 export const DEFAULT_SAVINGS: SavingsSettings = {
-  rulesets: { ads: true, privacy: true, frames: false }, pausedHosts: [], noAv1: false, devSet: [], devActive: true,
+  rulesets: { ads: true, privacy: true, frames: false }, pausedHosts: [], noAv1: false, cosmetic: true, devSet: [], devActive: true,
   qaBypass: true, qaHosts: []
 };
 
@@ -28,12 +32,13 @@ export interface SavingsStatus {
   settings: SavingsSettings;
   currentHost: string | null;
   videoPermission: boolean;
+  cosmeticPermission: boolean;
   formProtection: boolean;
   extensions: ExtensionStatus[];
   discarded?: number;
 }
 export type SavingsRequest = { type: 'savings-status' }
-  | { type: 'savings'; rulesets?: Partial<Record<Ruleset, boolean>>; noAv1?: boolean; devActive?: boolean }
+  | { type: 'savings'; rulesets?: Partial<Record<Ruleset, boolean>>; noAv1?: boolean; cosmetic?: boolean; devActive?: boolean }
   | { type: 'savings-pause'; host: string; paused: boolean }
   | { type: 'savings-dev-set'; id: string; member: boolean }
   | { type: 'savings-qa'; bypass?: boolean; host?: string; member?: boolean }
@@ -52,6 +57,7 @@ export function normalizeSavings(value: unknown): SavingsSettings {
     rulesets,
     pausedHosts: Array.isArray(input?.pausedHosts) ? [...new Set(input.pausedHosts.filter(validHost))].sort() : [],
     noAv1: input?.noAv1 === true,
+    cosmetic: typeof input?.cosmetic === 'boolean' ? input.cosmetic : true,
     devSet: ids(input?.devSet),
     devActive: typeof input?.devActive === 'boolean' ? input.devActive : true,
     qaBypass: typeof input?.qaBypass === 'boolean' ? input.qaBypass : true,
@@ -82,6 +88,14 @@ export function qaRules(settings: Pick<SavingsSettings, 'qaBypass' | 'qaHosts'>)
   ];
 }
 
+// Hidden ad slots on every site except where blocking is off: paused sites and, with QA bypass, test hosts.
+// Private IPs are not expressible as match patterns, so pages there still get the hiding CSS.
+export function cosmeticScript(settings: SavingsSettings): chrome.scripting.RegisteredContentScript {
+  const open = [...settings.pausedHosts, ...settings.qaBypass ? [...QA_DOMAINS, ...settings.qaHosts] : []];
+  return { id: COSMETIC_SCRIPT, css: ['cosmetic.css'], matches: COSMETIC_MATCHES, runAt: 'document_start', allFrames: true,
+    ...open.length ? { excludeMatches: [...new Set(open)].map(host => `*://*.${host}/*`) } : {} };
+}
+
 // Manual "free memory now": skips only tabs the browser or the user is actively using.
 export function manuallyDiscardable(tab: chrome.tabs.Tab): boolean {
   return tab.id !== undefined && !tab.active && !tab.pinned && !tab.audible && !tab.discarded && !tab.incognito &&
@@ -107,18 +121,33 @@ export class Savings {
     const existing = await dnr.getDynamicRules();
     await dnr.updateDynamicRules({ removeRuleIds: existing.map(rule => rule.id), addRules: [...pauseRules(settings.pausedHosts), ...qaRules(settings)] });
     await dnr.setExtensionActionOptions({ displayActionCountAsBadgeText: true });
-    const registered = await this.api.scripting.getRegisteredContentScripts({ ids: [AV1_SCRIPT] });
-    const wanted = settings.noAv1 && await this.api.permissions.contains({ origins: VIDEO_MATCHES });
-    if (registered.length && !wanted) await this.api.scripting.unregisterContentScripts({ ids: [AV1_SCRIPT] });
-    if (!registered.length && wanted) {
-      await this.api.scripting.registerContentScripts([{ id: AV1_SCRIPT, js: ['no-av1.js'], matches: VIDEO_MATCHES,
-        runAt: 'document_start', world: 'MAIN', allFrames: true }]);
-    }
+    const av1 = settings.noAv1 && await this.api.permissions.contains({ origins: VIDEO_MATCHES });
+    await this.script(AV1_SCRIPT, av1 ? { id: AV1_SCRIPT, js: ['no-av1.js'], matches: VIDEO_MATCHES,
+      runAt: 'document_start', world: 'MAIN', allFrames: true } : null);
+    const cosmetic = settings.cosmetic && settings.rulesets.ads && await this.api.permissions.contains({ origins: COSMETIC_MATCHES });
+    await this.script(COSMETIC_SCRIPT, cosmetic ? cosmeticScript(settings) : null);
+  }
+
+  // Re-registers on every apply, so a changed exclusion list reaches the next page load.
+  private async script(id: string, script: chrome.scripting.RegisteredContentScript | null): Promise<void> {
+    const registered = await this.api.scripting.getRegisteredContentScripts({ ids: [id] });
+    if (registered.length) await this.api.scripting.unregisterContentScripts({ ids: [id] });
+    if (script) await this.api.scripting.registerContentScripts([script]);
   }
 
   private async setDevExtensions(settings: SavingsSettings, ids: string[] = settings.devSet): Promise<void> {
     const installed = new Set((await this.api.management.getAll()).map(item => item.id));
     for (const id of ids) if (installed.has(id)) await this.api.management.setEnabled(id, settings.devActive);
+  }
+
+  // Once per profile: a tab that asks for site access, since only a click can trigger the permission prompt.
+  async welcome(): Promise<void> {
+    if ((await this.api.storage.local.get('welcomed')).welcomed === true) return;
+    if (!await this.api.permissions.contains({ origins: COSMETIC_MATCHES })) {
+      await this.api.tabs.create({ url: this.api.runtime.getURL('welcome.html') });
+    }
+    // Set after the tab exists, so `welcomed` also tells automation that the tab is there to close.
+    await this.api.storage.local.set({ welcomed: true });
   }
 
   initialize(): Promise<void> {
@@ -139,6 +168,10 @@ export class Savings {
         if (message.noAv1 !== undefined) {
           if (typeof message.noAv1 !== 'boolean') throw new Error('Неправильний стан перемикача.');
           settings.noAv1 = message.noAv1;
+        }
+        if (message.cosmetic !== undefined) {
+          if (typeof message.cosmetic !== 'boolean') throw new Error('Неправильний стан перемикача.');
+          settings.cosmetic = message.cosmetic;
         }
         if (message.devActive !== undefined) {
           if (typeof message.devActive !== 'boolean') throw new Error('Неправильний стан перемикача.');
@@ -190,6 +223,7 @@ export class Savings {
       return {
         settings: structuredClone(settings), currentHost: current ? hostname(current.url) : null,
         videoPermission: await this.api.permissions.contains({ origins: VIDEO_MATCHES }),
+        cosmeticPermission: await this.api.permissions.contains({ origins: COSMETIC_MATCHES }),
         formProtection: await this.api.permissions.contains({ origins: FORM_ORIGINS }), extensions,
         ...(discarded === undefined ? {} : { discarded })
       };

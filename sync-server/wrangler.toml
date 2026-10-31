@@ -1,0 +1,27 @@
+name = "lehko-sync"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "ACCOUNT"
+class_name = "Account"
+
+[[durable_objects.bindings]]
+name = "PAIR"
+class_name = "Pair"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Account", "Pair"]
+
+[[durable_objects.bindings]]
+name = "IDENTITY"
+class_name = "Identity"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Identity"]
+
+[vars]
+GOOGLE_CLIENT_ID = "436251774750-jdg7clttfvtodmdlvsakaavepu4prnfp.apps.googleusercontent.com"

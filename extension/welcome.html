@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Легко — ще один крок</title>
+  <link rel="stylesheet" href="popup.css">
+  <script type="module" src="welcome.js"></script>
+</head>
+<body class="page">
+  <main>
+    <header>
+      <div class="brand"><span class="mark" aria-hidden="true">л.</span><div><h1>Легко</h1><p>Менше зайвого у пам’яті.</p></div></div>
+    </header>
+
+    <p>Реклама й трекери вже блокуються. Решта налаштувань — у меню розширення або за Alt+Shift+F.</p>
+
+    <section class="site" aria-labelledby="cosmetic-title">
+      <span class="eyebrow">ЩЕ ОДИН КРОК</span>
+      <h2 id="cosmetic-title">Сховати порожні рекламні блоки</h2>
+      <p>Після блокування реклами на сторінках лишаються порожні місця під неї. На деяких сайтах вони безкінечно анімуються й навантажують GPU: на CNN це близько 13% ядра процесора, поки вкладка відкрита.</p>
+      <p>Щоб ховати їх, Легко додає на сторінки один стиль. Для цього браузер попросить доступ до всіх сайтів. Вміст сторінок Легко не читає й нікуди не надсилає.</p>
+      <button id="grant" class="primary" disabled>Дозволити й сховати</button>
+      <div class="site-row"><span id="welcome-message" role="status" aria-live="polite"></span><button id="later" class="text-button">Не зараз</button></div>
+    </section>
+  </main>
+</body>
+</html>

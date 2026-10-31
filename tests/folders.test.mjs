@@ -49,7 +49,7 @@ function fixture({ urls = A, active = 1, pinned = [], guard } = {}) {
         return structuredClone(data.tabs.filter(t => (windowId === undefined || t.windowId === windowId) && (!active || t.active)));
       },
       async get(id) { return structuredClone(find(id)); },
-      async create({ windowId = 1, url, active = true }) { data.createCalls++; return structuredClone(make({ url, active, windowId })); },
+      async create({ windowId = 1, url, active = true, pinned: isPinned = false }) { data.createCalls++; return structuredClone(make({ url, active, windowId, pinned: isPinned })); },
       async remove(id) {
         const gone = find(id);
         data.tabs = data.tabs.filter(t => t !== gone);
@@ -113,7 +113,7 @@ test('switch snapshots and closes the old tabs, recreates the target with only t
     assert.equal(now[i].discarded, true);
     assert.equal(f.data.session[`lazy:${now[i].id}`].url, A[i], 'lazy map remembers what the discarded tab stands for');
   }
-  assert.equal(f.data.tabs.find(t => t.pinned).id, pinnedId, 'pinned tab untouched');
+  assert.equal(f.data.tabs.some(t => t.pinned && t.id === pinnedId), false, 'the pinned tab stayed with its folder');
   const stored = f.data.local.folders.find(x => x.id === work);
   assert.deepEqual(stored.tabs.map(t => t.url), ['chrome://newtab/', ...B].slice(0, stored.tabs.length));
   assert.ok(stored.tabs.some(t => t.url === B[0]));
@@ -146,7 +146,7 @@ test('guard blocks switch and create, receives only the tabs to close, and force
   assert.deepEqual(status.blocked, blockers);
   assert.equal(status.currentId, main);
   assert.equal(status.folders.length, 1, 'blocked create adds no folder');
-  assert.deepEqual(seen.at(-1), A, 'pinned tabs are never offered to the guard');
+  assert.deepEqual(seen.at(-1), ['https://pinned.example/', ...A], 'pinned tabs close too, so the guard sees them');
   assert.deepEqual(f.window(), before);
 
   status = await f.request({ type: 'folders-create', name: 'Нова', force: true });
@@ -234,7 +234,7 @@ test('moving the last tab opens a replacement first; pinned tabs cannot be moved
   assert.equal(f.window().length, 1);
   assert.equal(f.data.local.folders[0].tabs.length, 2, 'moved into «Основна»');
   f.data.tabs.forEach(t => { t.active = t.pinned; });
-  await assert.rejects(f.request({ type: 'folders-move-tab', id: main }), /Закріплені/);
+  await assert.rejects(f.request({ type: 'folders-move-tab', id: main }), /відкріпіть/);
 });
 
 test('first request after a browser restart rebuilds the stored folder instead of snapshotting the window over it', async () => {
@@ -303,4 +303,20 @@ test('isFoldersRequest matches only the folders- prefix', () => {
   assert.equal(isFoldersRequest({ type: 'savings-status' }), false);
   assert.equal(isFoldersRequest({ type: 'status' }), false);
   assert.equal(isFoldersRequest({}), false);
+});
+
+test('pinned tabs belong to their folder and travel with it', async () => {
+  const f = fixture({ pinned: ['https://pin.example/mail', 'https://pin.example/cal'] });
+  await f.request({ type: 'folders-list' });
+  const [main] = (await f.request({ type: 'folders-create', name: 'Друга' })).folders;
+  const pinnedUrls = () => f.data.tabs.filter(t => t.pinned).map(t => t.url);
+  assert.deepEqual(pinnedUrls(), [], 'the new folder opens without them');
+  f.make({ url: 'https://pin.example/other', pinned: true });
+  await f.request({ type: 'folders-list' });
+  await f.request({ type: 'folders-switch', id: main.id });
+  assert.equal(f.data.tabs.filter(t => t.pinned).length, 2, 'the first folder brings back its own pinned tabs');
+  assert.equal(pinnedUrls().includes('https://pin.example/other'), false);
+  const stored = f.data.local.folders;
+  assert.deepEqual(stored.find(x => x.id === main.id).pinned.map(t => t.url), ['https://pin.example/mail', 'https://pin.example/cal']);
+  assert.deepEqual(stored.find(x => x.id !== main.id).pinned.map(t => t.url), ['https://pin.example/other']);
 });

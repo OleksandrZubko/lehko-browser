@@ -64,8 +64,11 @@ export function swapMiB() {
   return Number(execFileSync('/usr/sbin/sysctl', ['-n', 'vm.swapusage'], { encoding: 'utf8' }).match(/used = ([\d.]+)M/)?.[1]);
 }
 
-export async function launchChrome(profile, flags) {
-  const chrome = spawn(process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', [
+export const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+
+// `binary` lets other Chromium builds (Brave, our own Chromium) run through the same harness.
+export async function launchChrome(profile, flags, binary = CHROME) {
+  const chrome = spawn(binary, [
     `--user-data-dir=${profile}`, '--remote-debugging-port=0', '--enable-unsafe-extension-debugging',
     '--no-first-run', '--no-default-browser-check', '--window-size=1280,860', ...flags, 'about:blank'
   ], { stdio: 'ignore' });

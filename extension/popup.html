@@ -8,26 +8,37 @@
   <script type="module" src="popup.js"></script>
   <script type="module" src="savings-popup.js"></script>
   <script type="module" src="folders-popup.js"></script>
+  <script src="vendor/argon2.umd.min.js"></script>
+  <script type="module" src="sync-popup.js"></script>
 </head>
 <body>
   <main>
     <header>
       <div class="brand"><span class="mark" aria-hidden="true">л.</span><div><h1>Легко</h1><p>Менше зайвого у пам’яті.</p></div></div>
-      <span class="tag">LAB 0.3</span>
+      <span class="tag">LAB 0.4</span>
     </header>
 
     <section class="folders" aria-labelledby="folders-title">
-      <h2 id="folders-title">Папки</h2>
-      <p class="hint">У вікні відкриті лише вкладки поточної папки, решта не займає пам’ять. Закріплені вкладки не входять до папок.</p>
+      <div class="site-row"><h2 id="folders-title">Папки</h2><button id="folders-open-panel" class="text-button" type="button" title="Alt+Shift+G" hidden>Відкрити збоку</button></div>
+      <p class="hint">У вікні відкриті лише вкладки поточної папки, решта не займає пам’ять. Закріплені вкладки теж належать папці.</p>
+      <div class="toggle-row"><div><p>Панель папок виїжджає, коли навести мишу на лівий край сторінки.</p></div>
+        <label class="switch"><input id="folder-edge" type="checkbox" role="switch" aria-label="Панель папок на лівому краю" checked><span aria-hidden="true"></span></label></div>
       <ul id="folders-list" class="folder-list"></ul>
       <div id="folders-blocked" class="folder-blocked" role="alert" hidden></div>
       <div id="folders-footer" class="folder-footer"></div>
       <p id="folders-message" class="error" role="status" aria-live="polite"></p>
     </section>
 
+    <details id="sync-details" class="sync"><summary>Синхронізація <span id="sync-state"></span></summary>
+      <div id="sync-body"></div>
+      <p id="sync-message" class="error" role="status" aria-live="polite"></p>
+    </details>
+
     <section class="savings" aria-label="Економія ресурсів">
       <div class="toggle-row"><div><h2>Реклама</h2><p>EasyList: менше скриптів, iframe і відео-реклами.</p></div>
         <label class="switch"><input id="rules-ads" type="checkbox" role="switch" aria-label="Блокувати рекламу" disabled><span aria-hidden="true"></span></label></div>
+      <div class="toggle-row"><div><h2>Порожні рекламні блоки</h2><p>Ховає місця заблокованої реклами, щоб їхні анімації не навантажували GPU. Потрібен доступ до сайтів.</p></div>
+        <label class="switch"><input id="cosmetic" type="checkbox" role="switch" aria-label="Ховати порожні рекламні блоки" disabled><span aria-hidden="true"></span></label></div>
       <div class="toggle-row"><div><h2>Трекери</h2><p>EasyPrivacy: аналітика й пікселі не завантажуються.</p></div>
         <label class="switch"><input id="rules-privacy" type="checkbox" role="switch" aria-label="Блокувати трекери" disabled><span aria-hidden="true"></span></label></div>
       <div class="toggle-row"><div><h2>Чужі вбудовані фрейми</h2><p>Суворо: блокує віджети, вбудоване відео й коментарі інших сайтів. Капчі, оплата й вхід працюють.</p></div>
@@ -78,7 +89,7 @@
 
     <p id="message" role="status" aria-live="polite"></p>
     <footer><span id="last-check">Перевірка раз на хвилину</span><button id="refresh" class="text-button">Оновити</button></footer>
-    <p class="privacy">Дані залишаються на цьому пристрої. Дозвіл «вкладки» дає доступ до адрес і назв, папки зберігають лише їх. Блокування працює за правилами браузера без доступу до сторінок. Скрипт «без AV1» запускається тільки на YouTube, а перевірка форм лише порівнює поля з початковими значеннями перед вивантаженням чи перемиканням папки; обидва працюють тільки після вашого дозволу.</p>
+    <p class="privacy">Дані залишаються на цьому пристрої, поки ви не ввімкнете синхронізацію: тоді папки й адреси відкритих вкладок шифруються тут і сервер бачить лише шифротекст. Панель папок додає на вебсторінки тонку смугу біля лівого краю й нічого не читає зі сторінки. Дозвіл «вкладки» дає доступ до адрес і назв, папки зберігають лише їх. Блокування працює за правилами браузера без доступу до сторінок. Скрипт «без AV1» запускається тільки на YouTube, а перевірка форм лише порівнює поля з початковими значеннями перед вивантаженням чи перемиканням папки; обидва працюють тільки після вашого дозволу.</p>
   </main>
 </body>
 </html>

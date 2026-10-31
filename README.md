@@ -100,7 +100,7 @@ npm run open:lab -- lean --freeze              # заморожування фо
 
 ## Встановлення
 
-Готова папка розширення: [`dist/`](dist/). Архів: [`artifacts/lehko-0.3.0.zip`](artifacts/lehko-0.3.0.zip). Для збірки з вихідного коду потрібен Node.js 22+:
+Готова папка розширення: [`dist/`](dist/). Архів: [`artifacts/lehko-0.3.1.zip`](artifacts/lehko-0.3.1.zip). Для збірки з вихідного коду потрібен Node.js 22+:
 
 ```sh
 npm ci

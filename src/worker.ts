@@ -2,12 +2,14 @@ import { Controller, type Request } from './controller.js';
 import { Savings, isSavingsRequest, type SavingsRequest } from './savings.js';
 import { Folders, isFoldersRequest, type FoldersRequest } from './folders.js';
 import { Protection } from './protection.js';
+import { Sync, SYNC_ALARM, isSyncRequest, type SyncRequest } from './sync.js';
 
 // Open DevTools, local/test hosts and dirty forms keep a tab from being discarded or closed by a folder switch.
 const protection = new Protection(chrome);
 const controller = new Controller(chrome, undefined, protection);
 const savings = new Savings(chrome, protection);
 const folders = new Folders(chrome, protection.guard);
+const sync = new Sync(chrome, folders);
 const logFailure = (error: unknown) => console.error('Легко: операція не виконана', error instanceof Error ? error.message : 'Невідома помилка');
 
 // Register synchronously so events can wake an otherwise stopped MV3 worker.
@@ -19,12 +21,23 @@ chrome.runtime.onStartup.addListener(() => {
 });
 chrome.runtime.onInstalled.addListener(() => {
   void controller.initialize().catch(logFailure);
-  void savings.initialize().catch(logFailure);
+  void savings.initialize().then(() => savings.welcome()).catch(logFailure);
   void folders.init().catch(logFailure);
 });
+// Host access gates element hiding; granting it for form protection covers it too.
+chrome.permissions.onAdded.addListener(() => { void savings.initialize().catch(logFailure); });
+chrome.permissions.onRemoved.addListener(() => { void savings.initialize().catch(logFailure); });
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === 'sweep') void controller.sweep().catch(logFailure);
+  if (alarm.name === SYNC_ALARM) void sync.run(true).catch(logFailure);
 });
+// A keyboard command counts as a user gesture, which Chromium requires to open a side panel.
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command === 'folders-panel' && tab?.windowId !== undefined) void chrome.sidePanel.open({ windowId: tab.windowId }).catch(logFailure);
+});
+chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' && changes.folders) sync.schedule(); });
+chrome.windows.onFocusChanged.addListener(id => { if (id !== chrome.windows.WINDOW_ID_NONE) sync.focused(); });
+chrome.tabGroups.onUpdated.addListener(group => folders.groupChanged(group));
 chrome.tabs.onActivated.addListener(({ tabId }) => { void controller.activity(tabId, true).catch(logFailure); });
 chrome.tabs.onCreated.addListener(tab => {
   if (tab.id !== undefined) void controller.activity(tab.id, tab.active).catch(logFailure);
@@ -46,10 +59,11 @@ chrome.tabs.onActivated.addListener(info => folders.activated(info));
 chrome.tabs.onAttached.addListener((tabId, info) => folders.attached(tabId, info));
 chrome.tabs.onDetached.addListener((tabId, info) => folders.detached(tabId, info));
 chrome.windows.onRemoved.addListener(id => { void folders.windowRemoved(id).catch(logFailure); });
-chrome.runtime.onMessage.addListener((message: Request | SavingsRequest | FoldersRequest, sender, respond) => {
+chrome.runtime.onMessage.addListener((message: Request | SavingsRequest | FoldersRequest | SyncRequest, sender, respond) => {
   if (sender.id !== chrome.runtime.id || !sender.url?.startsWith(chrome.runtime.getURL(''))) return false;
   if (!message || typeof message !== 'object') { respond({ ok: false, error: 'Невідома команда.' }); return false; }
   const reply = isFoldersRequest(message) ? folders.request(message)
+    : isSyncRequest(message) ? sync.request(message)
     : isSavingsRequest(message) ? savings.request(message) : controller.request(message as Request);
   void reply.then(status => respond({ ok: true, status }), error => {
     respond({ ok: false, error: error instanceof Error ? error.message : 'Операція не виконана.' });
@@ -58,3 +72,4 @@ chrome.runtime.onMessage.addListener((message: Request | SavingsRequest | Folder
 });
 
 void controller.initialize().catch(logFailure);
+void sync.init().catch(logFailure);

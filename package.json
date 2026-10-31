@@ -1,6 +1,6 @@
 {
   "name": "light-browser-lab",
-  "version": "0.3.0",
+  "version": "0.4.7",
   "private": true,
   "type": "module",
   "engines": {
@@ -24,11 +24,16 @@
     "test:collector": "node scripts/collector-smoke.mjs",
     "benchmark:report": "python3 scripts/report_metrics.py",
     "test:protection": "npm run build && node scripts/protection-smoke.mjs",
-    "benchmark:folders": "node scripts/folders-benchmark.mjs"
+    "benchmark:folders": "node scripts/folders-benchmark.mjs",
+    "test:edge": "npm run build && node scripts/folders-edge-smoke.mjs",
+    "test:lazy": "npm run build && node scripts/lazy-tabs-smoke.mjs",
+    "test:panel": "npm run build && node scripts/folders-panel-smoke.mjs",
+    "test:sync": "npm run build && node scripts/sync-smoke.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.1.0",
-    "typescript": "^5.9.3",
-    "playwright": "^1.62.1"
+    "hash-wasm": "4.12.0",
+    "playwright": "^1.62.1",
+    "typescript": "^5.9.3"
   }
 }

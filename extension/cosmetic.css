@@ -1,0 +1,18 @@
+/* Element hiding for ad slots left empty once ad requests are blocked. Each selector is a generic
+   EasyList `##` rule that EasyList itself never excepts (`#@#`) on any site; keep the list short. */
+.ad-slot,
+.ad-slot-container,
+.AdSlot,
+.ad-container__ad-slot,
+amp-ad,
+.dfp-ad,
+.DFPad,
+.ad-dfp-row,
+.ad-dfp-column,
+.gpt-ad,
+.ad-gpt,
+.ad-gpt-container,
+.GoogleDfpAd,
+.GoogleDfpAd-container,
+.ad-google,
+.ad--google { display: none !important; }

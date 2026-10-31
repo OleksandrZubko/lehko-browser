@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Легко — Папки</title>
+  <link rel="stylesheet" href="popup.css">
+  <style>body { width: auto; } main { padding: 16px; }</style>
+  <script type="module" src="folders-popup.js"></script>
+</head>
+<body>
+  <main>
+    <section class="folders" aria-labelledby="folders-title">
+      <h2 id="folders-title">Папки</h2>
+      <ul id="folders-list" class="folder-list"></ul>
+      <div id="folders-blocked" class="folder-blocked" role="alert" hidden></div>
+      <div id="folders-footer" class="folder-footer"></div>
+      <p id="folders-message" class="error" role="status" aria-live="polite"></p>
+    </section>
+  </main>
+</body>
+</html>

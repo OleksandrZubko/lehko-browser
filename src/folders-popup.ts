@@ -10,12 +10,16 @@ const footer = element<HTMLDivElement>('folders-footer');
 const blockedBox = element<HTMLDivElement>('folders-blocked');
 const message = element<HTMLParagraphElement>('folders-message');
 
+// The same script drives the popup and the side panel; only the popup closes after an action.
+const isPanel = location.pathname.endsWith('folders-panel.html');
+
 let status: FoldersStatus = { currentId: undefined, folders: [] };
 let windowId: number | undefined;
 let editing: { id: string; mode: 'rename' | 'delete' } | null = null;
 let creating = false;
 let blocked: { request: FoldersRequest; blockers: Blocker[] } | null = null;
 let busy = false;
+let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
 // Distributes over the union so each request keeps its own fields.
 type Draft<T> = T extends unknown ? Omit<T, 'windowId'> : never;
@@ -35,7 +39,7 @@ async function run(request: Draft<FoldersRequest>, { close = false } = {}): Prom
     editing = null;
     creating = false;
     blocked = found?.length ? { request: request as FoldersRequest, blockers: found } : null;
-    if (close && !blocked) { window.close(); return; }
+    if (close && !blocked && !isPanel) { window.close(); return; }
   } catch (error) {
     message.textContent = error instanceof Error ? error.message : 'Операція не виконана.';
   } finally {
@@ -126,9 +130,37 @@ function render(): void {
   footer.querySelector('input')?.focus();
 }
 
+function refreshLater(): void {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    if (busy || editing || creating || blocked) return; // never pull a field or a question away from the user
+    void run({ type: 'folders-list' });
+  }, 300);
+}
+
 async function start(): Promise<void> {
   const param = new URLSearchParams(location.search).get('windowId');
-  try { windowId = param !== null ? Number(param) : (await chrome.windows.getLastFocused()).id; } catch { /* worker falls back to the focused window */ }
+  try {
+    windowId = param !== null ? Number(param) : (await (isPanel ? chrome.windows.getCurrent() : chrome.windows.getLastFocused())).id;
+  } catch { /* worker falls back to the focused window */ }
+  if (isPanel) {
+    // Stays open while tabs and other devices change the folders. Unchanged values fire no event, so this cannot loop.
+    chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' && (changes.folders || changes.currentId)) refreshLater(); });
+  } else {
+    const edge = document.getElementById('folder-edge') as HTMLInputElement | null;
+    if (edge) {
+      void chrome.storage.local.get('folderEdge').then(({ folderEdge }) => { edge.checked = folderEdge !== false; });
+      edge.addEventListener('change', () => { void chrome.storage.local.set({ folderEdge: edge.checked }); });
+    }
+    const open = document.getElementById('folders-open-panel');
+    if (open) {
+      open.hidden = false;
+      // Must stay in the click: Chromium opens a side panel only from a user gesture.
+      open.addEventListener('click', () => {
+        if (windowId !== undefined) void chrome.sidePanel.open({ windowId }).then(() => window.close(), () => { message.textContent = 'Не вдалося відкрити панель.'; });
+      });
+    }
+  }
   await run({ type: 'folders-list' });
 }
 void start();

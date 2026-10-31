@@ -1,5 +1,5 @@
 import { FORM_ORIGINS, isQaHost } from './protection.js';
-import { VIDEO_MATCHES, type Ruleset, type SavingsRequest, type SavingsStatus } from './savings.js';
+import { COSMETIC_MATCHES, VIDEO_MATCHES, type Ruleset, type SavingsRequest, type SavingsStatus } from './savings.js';
 
 function element<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -9,6 +9,7 @@ function element<T extends HTMLElement>(id: string): T {
 const rulesets: Record<Ruleset, HTMLInputElement> = {
   ads: element('rules-ads'), privacy: element('rules-privacy'), frames: element('rules-frames')
 };
+const cosmetic = element<HTMLInputElement>('cosmetic');
 const noAv1 = element<HTMLInputElement>('no-av1');
 const togglePause = element<HTMLButtonElement>('toggle-pause');
 const discardOthers = element<HTMLButtonElement>('discard-others');
@@ -23,6 +24,7 @@ let confirmDiscard = false;
 
 function controls(): void {
   for (const input of [...Object.values(rulesets), noAv1, devActive, qaBypass, formProtection]) input.disabled = busy || !current;
+  cosmetic.disabled = busy || !current?.settings.rulesets.ads;
   qaSite.disabled = busy || !current?.currentHost;
   togglePause.disabled = busy || !current?.currentHost;
   discardOthers.disabled = busy || !current;
@@ -32,6 +34,7 @@ function controls(): void {
 function render(status: SavingsStatus): void {
   current = status;
   for (const [id, input] of Object.entries(rulesets)) input.checked = status.settings.rulesets[id as Ruleset];
+  cosmetic.checked = status.settings.cosmetic && status.cosmeticPermission;
   noAv1.checked = status.settings.noAv1 && status.videoPermission;
   devActive.checked = status.settings.devActive;
   qaBypass.checked = status.settings.qaBypass;
@@ -110,6 +113,13 @@ async function send(request: SavingsRequest): Promise<void> {
 for (const [id, input] of Object.entries(rulesets)) {
   input.addEventListener('change', () => { void send({ type: 'savings', rulesets: { [id]: input.checked } }); });
 }
+cosmetic.addEventListener('change', () => {
+  if (!cosmetic.checked) { void send({ type: 'savings', cosmetic: false }); return; }
+  void chrome.permissions.request({ origins: COSMETIC_MATCHES }).then(granted => {
+    if (granted) void send({ type: 'savings', cosmetic: true });
+    else { cosmetic.checked = false; message.textContent = 'Без доступу до сайтів порожні блоки не ховаються.'; }
+  });
+});
 noAv1.addEventListener('change', () => {
   if (!noAv1.checked) { void send({ type: 'savings', noAv1: false }); return; }
   // Must be requested from the click itself; the worker only checks the grant.

@@ -55,6 +55,12 @@ async function launch(dir, restore) {
   const { id } = await cdp.send('Extensions.loadUnpacked', { path: extension });
   const ours = w => w.url().startsWith(`chrome-extension://${id}/`);
   const worker = ctx.serviceWorkers().find(ours) ?? await ctx.waitForEvent('serviceworker', { predicate: ours });
+  // The first install opens the welcome tab; close it so it is not part of the folders under test.
+  await until(() => worker.evaluate(async () => (await chrome.storage.local.get('welcomed')).welcomed === true), 'welcome tab');
+  await worker.evaluate(async () => {
+    const tabs = await chrome.tabs.query({ url: chrome.runtime.getURL('welcome.html') });
+    if (tabs.length) await chrome.tabs.remove(tabs.map(tab => tab.id));
+  });
   return { context: ctx, browserCdp: cdp, id, worker, startupUrls };
 }
 
@@ -243,9 +249,10 @@ try {
   let now = await tabs('unpinned');
   assert.equal(now.length, 1);
   assert.match(now[0].url, /^chrome:\/\/newtab/);
-  assert.equal((await tabs('pinned')).length, 1);
+  assert.equal((await tabs('pinned')).length, 0, 'the pinned tab stays with its folder');
   data = await stored();
   assert.deepEqual(folderUrls(data, 'Основна'), A);
+  assert.deepEqual(data.folders.find(f => f.name === 'Основна').pinned.map(t => t.url), [`${base}/pinned`]);
   assert.deepEqual(await badge(), { color: '#f76b15', title: 'Легко · Папка: Робота' });
   ok('create "Робота": window has 1 new tab, old tabs closed, "Основна" saved with 3 tabs');
 
@@ -311,13 +318,13 @@ try {
   }, mainWindow);
   ok('lazy tab loads its real URL when activated');
 
-  // ---- pinned untouched ----
+  // ---- pinned tabs return with their folder, lazily, and load on activation ----
   const pinned = await tabs('pinned');
   assert.equal(pinned.length, 1);
-  assert.equal(pinned[0].id, pinnedId);
-  assert.equal(pinned[0].discarded, false);
-  assert.equal(await first.evaluate(() => globalThis.marker), 'untouched');
-  ok('pinned tab survived all switches (same id, not reloaded)');
+  assert.equal(pinned[0].discarded, true);
+  await worker.evaluate(id => chrome.tabs.update(id, { active: true }), pinned[0].id);
+  await until(async () => (await tabs('pinned'))[0]?.url === `${base}/pinned`, 'pinned tab loads when activated');
+  ok('the pinned tab came back with its folder and loads on activation');
 
   // ---- two simultaneous switches never overlap ----
   const [r1, r2] = await Promise.all([send({ type: 'folders-switch', id: workId }), send({ type: 'folders-switch', id: mainId })]);
