@@ -1,0 +1,33 @@
+diff --git a/chrome/browser/extensions/component_loader.cc b/chrome/browser/extensions/component_loader.cc
+index 54969eeb..5e028ce0 100644
+--- a/chrome/browser/extensions/component_loader.cc
++++ b/chrome/browser/extensions/component_loader.cc
+@@ -95,6 +95,10 @@
+ #include "chrome/browser/defaults.h"
+ #endif
+ 
++#if BUILDFLAG(IS_MAC)
++#include "base/apple/bundle_locations.h"
++#endif
++
+ static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
+ 
+ using content::BrowserThread;
+@@ -738,6 +742,17 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
+        command_line->HasSwitch(
+            ::switches::kDisableComponentExtensionsWithBackgroundPages));
+ 
++#if BUILDFLAG(IS_MAC)
++  // Lehko: the built-in extension ships as files in the app bundle, so it can
++  // be updated by repackaging, without rebuilding the browser.
++  if (!skip_session_components && !should_disable_background_extensions) {
++    AddOrReplace(base::apple::OuterBundlePath()
++                     .Append(FILE_PATH_LITERAL("Contents"))
++                     .Append(FILE_PATH_LITERAL("Resources"))
++                     .Append(FILE_PATH_LITERAL("extension")));
++  }
++#endif  // BUILDFLAG(IS_MAC)
++
+ #if BUILDFLAG(ENABLE_HANGOUT_SERVICES_EXTENSION)
+   const bool enable_hangout_services_extension_for_testing =
+       command_line->HasSwitch(::switches::kTestType) &&

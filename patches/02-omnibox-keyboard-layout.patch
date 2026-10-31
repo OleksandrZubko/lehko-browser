@@ -1,0 +1,166 @@
+diff --git a/components/omnibox/browser/BUILD.gn b/components/omnibox/browser/BUILD.gn
+index 33ab9043..6fa63dca 100644
+--- a/components/omnibox/browser/BUILD.gn
++++ b/components/omnibox/browser/BUILD.gn
+@@ -220,6 +220,7 @@ static_library("browser") {
+     "base_search_provider.h",
+     "bookmark_provider.cc",
+     "bookmark_provider.h",
++    "keyboard_layout_fix.h",
+     "bookmark_scoring_signals_annotator.cc",
+     "bookmark_scoring_signals_annotator.h",
+     "brave_search_suggestion_parser.cc",
+diff --git a/components/omnibox/browser/bookmark_provider.cc b/components/omnibox/browser/bookmark_provider.cc
+index 19156a5e..ca5cdc3c 100644
+--- a/components/omnibox/browser/bookmark_provider.cc
++++ b/components/omnibox/browser/bookmark_provider.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "components/omnibox/browser/bookmark_provider.h"
+ 
++#include <iterator>
+ #include <stddef.h>
+ 
+ #include <algorithm>
+@@ -17,6 +18,7 @@
+ #include "components/omnibox/browser/autocomplete_match.h"
+ #include "components/omnibox/browser/autocomplete_provider_client.h"
+ #include "components/omnibox/browser/autocomplete_result.h"
++#include "components/omnibox/browser/keyboard_layout_fix.h"
+ #include "components/omnibox/browser/keyword_provider.h"
+ #include "components/omnibox/browser/match_compare.h"
+ #include "components/omnibox/browser/omnibox_field_trial.h"
+@@ -32,6 +34,7 @@
+ #include "third_party/omnibox_proto/groups.pb.h"
+ #include "ui/base/page_transition_types.h"
+ #include "url/url_constants.h"
++#include "url/third_party/mozilla/url_parse.h"
+ 
+ using bookmarks::BookmarkNode;
+ using bookmarks::TitledUrlMatch;
+@@ -57,6 +60,21 @@ void BookmarkProvider::Start(const AutocompleteInput& input,
+   }
+ 
+   DoAutocomplete(input);
++  // Lehko: see HistoryQuickProvider::Start().
++  if (auto fixed = omnibox::FixKeyboardLayout(input.text());
++      fixed && !input.in_keyword_mode()) {
++    ACMatches typed = std::move(matches_);
++    matches_.clear();
++    AutocompleteInput fixed_input(input);
++    fixed_input.UpdateText(*fixed, fixed->size(), url::Parsed());
++    DoAutocomplete(fixed_input);
++    for (AutocompleteMatch& match : matches_) {
++      match.allowed_to_be_default_match = false;
++      match.inline_autocompletion.clear();
++    }
++    matches_.insert(matches_.begin(), std::make_move_iterator(typed.begin()),
++                    std::make_move_iterator(typed.end()));
++  }
+ }
+ 
+ BookmarkProvider::~BookmarkProvider() = default;
+diff --git a/components/omnibox/browser/history_quick_provider.cc b/components/omnibox/browser/history_quick_provider.cc
+index ea466919..773d15b5 100644
+--- a/components/omnibox/browser/history_quick_provider.cc
++++ b/components/omnibox/browser/history_quick_provider.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "components/omnibox/browser/history_quick_provider.h"
+ 
++#include <iterator>
+ #include <stddef.h>
+ 
+ #include <algorithm>
+@@ -27,6 +28,7 @@
+ #include "components/omnibox/browser/autocomplete_match_type.h"
+ #include "components/omnibox/browser/autocomplete_provider_client.h"
+ #include "components/omnibox/browser/autocomplete_result.h"
++#include "components/omnibox/browser/keyboard_layout_fix.h"
+ #include "components/omnibox/browser/autocomplete_scoring_signals_annotator.h"
+ #include "components/omnibox/browser/history_url_provider.h"
+ #include "components/omnibox/browser/in_memory_url_index.h"
+@@ -77,6 +79,21 @@ void HistoryQuickProvider::Start(const AutocompleteInput& input,
+ 
+   if (in_memory_url_index_) {
+     DoAutocomplete();
++    // Lehko: also match what the same keys mean in the Latin layout. These only
++    // add to the list; Enter still acts on what was typed.
++    if (auto fixed = omnibox::FixKeyboardLayout(autocomplete_input_.text());
++        fixed && !autocomplete_input_.in_keyword_mode()) {
++      ACMatches typed = std::move(matches_);
++      matches_.clear();
++      autocomplete_input_.UpdateText(*fixed, fixed->size(), url::Parsed());
++      DoAutocomplete();
++      for (AutocompleteMatch& match : matches_) {
++        match.allowed_to_be_default_match = false;
++        match.inline_autocompletion.clear();
++      }
++      matches_.insert(matches_.begin(), std::make_move_iterator(typed.begin()),
++                      std::make_move_iterator(typed.end()));
++    }
+   }
+ }
+ 
+diff --git a/components/omnibox/browser/keyboard_layout_fix.h b/components/omnibox/browser/keyboard_layout_fix.h
+new file mode 100644
+index 00000000..91159c38
+--- /dev/null
++++ b/components/omnibox/browser/keyboard_layout_fix.h
+@@ -0,0 +1,56 @@
++// Copyright 2026 The Lehko Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef COMPONENTS_OMNIBOX_BROWSER_KEYBOARD_LAYOUT_FIX_H_
++#define COMPONENTS_OMNIBOX_BROWSER_KEYBOARD_LAYOUT_FIX_H_
++
++#include <optional>
++#include <string>
++
++namespace omnibox {
++
++// The Latin character on the same key of a Ukrainian or Russian keyboard, or 0.
++inline char16_t LatinOnSameKey(char16_t c) {
++  static constexpr char16_t kCyrillic[] =
++      u"йцукенгшщзхїъфівапролджєэячсмитьбюыґё";
++  static constexpr char16_t kLatin[] =
++      u"qwertyuiop[]]asdfghjkl;''zxcvbnm,.s``";
++  if (c >= u'А' && c <= u'Я') {
++    c += u'а' - u'А';
++  } else if (c == u'І' || c == u'Ї' || c == u'Є' || c == u'Ё') {
++    c += 0x50;
++  } else if (c == u'Ґ') {
++    c = u'ґ';
++  }
++  for (size_t i = 0; kCyrillic[i]; ++i) {
++    if (kCyrillic[i] == c) {
++      return kLatin[i];
++    }
++  }
++  return 0;
++}
++
++// `пщщпдуюсщь` -> `google.com`: the same keys pressed in the wrong layout.
++// Returns nothing unless the text has at least two letters to convert.
++inline std::optional<std::u16string> FixKeyboardLayout(
++    const std::u16string& text) {
++  std::u16string fixed = text;
++  size_t converted = 0;
++  for (char16_t& c : fixed) {
++    if (const char16_t latin = LatinOnSameKey(c)) {
++      c = latin;
++      ++converted;
++    } else if (c > 0x7f) {
++      return std::nullopt;
++    }
++  }
++  if (converted < 2) {
++    return std::nullopt;
++  }
++  return fixed;
++}
++
++}  // namespace omnibox
++
++#endif  // COMPONENTS_OMNIBOX_BROWSER_KEYBOARD_LAYOUT_FIX_H_

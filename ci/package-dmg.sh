@@ -28,6 +28,13 @@ if [[ -d "$EXT_DIR" ]]; then
   echo "Embedding built extension from $EXT_DIR into $RESOURCES/extension..."
   rm -rf "$RESOURCES/extension"
   cp -R "$EXT_DIR" "$RESOURCES/extension"
+  # patches/03-builtin-extension.patch loads this as a component extension, which needs a key for its ID.
+  node -e "
+    const fs = require('fs'), path = process.argv[1];
+    const manifest = JSON.parse(fs.readFileSync(path, 'utf8'));
+    manifest.key = fs.readFileSync(process.argv[2], 'utf8').trim();
+    fs.writeFileSync(path, JSON.stringify(manifest, null, 2));
+  " "$RESOURCES/extension/manifest.json" "$(dirname "$0")/builtin-extension.key"
 else
   echo "Warning: Extension directory $EXT_DIR not found!"
 fi
@@ -70,9 +77,8 @@ RESOURCES="$(cd "$DIR/../Resources" && pwd)"
 BIN="$DIR/Chromium-bin"
 [[ -f "$BIN" ]] || BIN="$DIR/Lehko-bin"
 
-# Lean runtime flags + auto-load built-in extension
+# Lean runtime flags; the built-in extension loads as a component (patches/03-builtin-extension.patch)
 FLAGS=(
-  "--load-extension=$RESOURCES/extension"
   "--disable-features=SpareRendererForSitePerProcess,MediaRouter,OnDeviceModelBackgroundDownload,LensOverlay,Compose,OptimizationHints"
   "--enable-features=CompressParkableStrings,MemorySaverModeRenderTuning"
   "--autoplay-policy=document-user-activation-required"
