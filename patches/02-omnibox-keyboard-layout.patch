@@ -11,7 +11,7 @@ index 33ab9043..6fa63dca 100644
      "bookmark_scoring_signals_annotator.h",
      "brave_search_suggestion_parser.cc",
 diff --git a/components/omnibox/browser/bookmark_provider.cc b/components/omnibox/browser/bookmark_provider.cc
-index 19156a5e..ca5cdc3c 100644
+index 19156a5e..7457889f 100644
 --- a/components/omnibox/browser/bookmark_provider.cc
 +++ b/components/omnibox/browser/bookmark_provider.cc
 @@ -4,6 +4,7 @@
@@ -38,7 +38,7 @@ index 19156a5e..ca5cdc3c 100644
  
  using bookmarks::BookmarkNode;
  using bookmarks::TitledUrlMatch;
-@@ -57,6 +60,21 @@ void BookmarkProvider::Start(const AutocompleteInput& input,
+@@ -57,6 +60,22 @@ void BookmarkProvider::Start(const AutocompleteInput& input,
    }
  
    DoAutocomplete(input);
@@ -51,7 +51,8 @@ index 19156a5e..ca5cdc3c 100644
 +    fixed_input.UpdateText(*fixed, fixed->size(), url::Parsed());
 +    DoAutocomplete(fixed_input);
 +    for (AutocompleteMatch& match : matches_) {
-+      match.allowed_to_be_default_match = false;
++      match.allowed_to_be_default_match = omnibox::IsHostPrefix(
++          match.destination_url.host_piece(), *fixed);
 +      match.inline_autocompletion.clear();
 +    }
 +    matches_.insert(matches_.begin(), std::make_move_iterator(typed.begin()),
@@ -61,7 +62,7 @@ index 19156a5e..ca5cdc3c 100644
  
  BookmarkProvider::~BookmarkProvider() = default;
 diff --git a/components/omnibox/browser/history_quick_provider.cc b/components/omnibox/browser/history_quick_provider.cc
-index ea466919..773d15b5 100644
+index ea466919..9062d367 100644
 --- a/components/omnibox/browser/history_quick_provider.cc
 +++ b/components/omnibox/browser/history_quick_provider.cc
 @@ -4,6 +4,7 @@
@@ -80,12 +81,12 @@ index ea466919..773d15b5 100644
  #include "components/omnibox/browser/autocomplete_scoring_signals_annotator.h"
  #include "components/omnibox/browser/history_url_provider.h"
  #include "components/omnibox/browser/in_memory_url_index.h"
-@@ -77,6 +79,21 @@ void HistoryQuickProvider::Start(const AutocompleteInput& input,
+@@ -77,6 +79,22 @@ void HistoryQuickProvider::Start(const AutocompleteInput& input,
  
    if (in_memory_url_index_) {
      DoAutocomplete();
-+    // Lehko: also match what the same keys mean in the Latin layout. These only
-+    // add to the list; Enter still acts on what was typed.
++    // Lehko: also match what the same keys mean in the Latin layout. Only a site
++    // whose host starts with those keys may lead the list and take Enter.
 +    if (auto fixed = omnibox::FixKeyboardLayout(autocomplete_input_.text());
 +        fixed && !autocomplete_input_.in_keyword_mode()) {
 +      ACMatches typed = std::move(matches_);
@@ -93,7 +94,8 @@ index ea466919..773d15b5 100644
 +      autocomplete_input_.UpdateText(*fixed, fixed->size(), url::Parsed());
 +      DoAutocomplete();
 +      for (AutocompleteMatch& match : matches_) {
-+        match.allowed_to_be_default_match = false;
++        match.allowed_to_be_default_match = omnibox::IsHostPrefix(
++            match.destination_url.host_piece(), *fixed);
 +        match.inline_autocompletion.clear();
 +      }
 +      matches_.insert(matches_.begin(), std::make_move_iterator(typed.begin()),
@@ -104,10 +106,10 @@ index ea466919..773d15b5 100644
  
 diff --git a/components/omnibox/browser/keyboard_layout_fix.h b/components/omnibox/browser/keyboard_layout_fix.h
 new file mode 100644
-index 00000000..91159c38
+index 00000000..e1092f87
 --- /dev/null
 +++ b/components/omnibox/browser/keyboard_layout_fix.h
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,75 @@
 +// Copyright 2026 The Lehko Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -117,6 +119,7 @@ index 00000000..91159c38
 +
 +#include <optional>
 +#include <string>
++#include <string_view>
 +
 +namespace omnibox {
 +
@@ -159,6 +162,24 @@ index 00000000..91159c38
 +    return std::nullopt;
 +  }
 +  return fixed;
++}
++
++// Whether `fixed` starts the site's host, as `goog` does for www.google.com.
++// Such a match may lead the list: a word that happens to convert to the start
++// of a visited host is rare, and anything shorter than 3 keys is too ambiguous.
++inline bool IsHostPrefix(std::string_view host, const std::u16string& fixed) {
++  if (host.starts_with("www.")) {
++    host.remove_prefix(4);
++  }
++  if (fixed.size() < 3 || fixed.size() > host.size()) {
++    return false;
++  }
++  for (size_t i = 0; i < fixed.size(); ++i) {
++    if (fixed[i] != static_cast<char16_t>(host[i])) {
++      return false;
++    }
++  }
++  return true;
 +}
 +
 +}  // namespace omnibox
