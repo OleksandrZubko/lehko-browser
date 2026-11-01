@@ -1,0 +1,42 @@
+diff --git a/chrome/browser/ui/views/tab_search_bubble_host.cc b/chrome/browser/ui/views/tab_search_bubble_host.cc
+index 01a6b7e97..a1477f0fa 100644
+--- a/chrome/browser/ui/views/tab_search_bubble_host.cc
++++ b/chrome/browser/ui/views/tab_search_bubble_host.cc
+@@ -4,7 +4,14 @@
+ 
+ #include "chrome/browser/ui/views/tab_search_bubble_host.h"
+ 
++#include "chrome/browser/extensions/extension_view_host.h"
++#include "chrome/browser/extensions/extension_view_host_factory.h"
++#include "chrome/browser/ui/views/extensions/extension_popup.h"
++#include "extensions/browser/extension_registry.h"
++#include "extensions/common/extension.h"
++
+ #include "base/functional/bind.h"
++#include "base/functional/callback_helpers.h"
+ #include "base/i18n/rtl.h"
+ #include "base/metrics/histogram_functions.h"
+ #include "base/strings/strcat.h"
+@@ -184,6 +191,22 @@ bool TabSearchBubbleHost::ShowTabSearchBubble(
+   TRACE_EVENT0("ui", "TabSearchBubbleHost::ShowTabSearchBubble");
+   base::trace_event::EmitNamedTrigger("show-tab-search-bubble");
+ 
++  // Lehko: this button shows the folders of the built-in extension. The ID comes
++  // from the key in ci/builtin-extension.key.
++  if (const extensions::Extension* lehko =
++          extensions::ExtensionRegistry::Get(profile_)
++              ->enabled_extensions()
++              .GetByID("cpbcghiehbjinnpgeklboaeflbnihilg")) {
++    ExtensionPopup::ShowPopup(
++        browser_window_interface_,
++        extensions::ExtensionViewHostFactory::CreatePopupHost(
++            *lehko, lehko->ResolveExtensionURL("folders-panel.html?bubble"),
++            browser_window_interface_),
++        button_, views::BubbleBorder::TOP_LEFT,
++        PopupShowAction::kShow, base::DoNothing());
++    return true;
++  }
++
+   if (webui_bubble_manager_->GetBubbleWidget()) {
+     return false;
+   }

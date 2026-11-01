@@ -60,6 +60,16 @@ try {
   await until(async () => (await page.evaluate(() => document.elementFromPoint(150, 300)?.tagName)) !== 'DIV', 'panel slides away', 3000);
   ok('leaving the panel hides it');
 
+  const width = await page.evaluate(() => innerWidth);
+  await page.mouse.move(400, 300);
+  await page.mouse.move(width - 1, 300, { steps: 4 });
+  await until(async () => (await page.evaluate(w => document.elementFromPoint(w - 150, 300)?.tagName, width)) === 'DIV', 'panel slides out on the right', 3000);
+  ok('hovering the right edge shows the panel on that side');
+  await page.mouse.move(400, 300);
+  await until(async () => (await page.evaluate(w => document.elementFromPoint(w - 150, 300)?.tagName, width)) !== 'DIV', 'right panel slides away', 3000);
+  ok('leaving the right panel hides it');
+  await sleep(400);
+
   await hover(page);
   await until(async () => (await page.evaluate(() => document.elementFromPoint(150, 300)?.tagName)) === 'DIV', 'panel slides out again', 3000);
   await sleep(250);

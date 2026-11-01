@@ -12,6 +12,8 @@ const message = element<HTMLParagraphElement>('folders-message');
 
 // The same script drives the popup and the side panel; only the popup closes after an action.
 const isPanel = location.pathname.endsWith('folders-panel.html');
+// In the bubble of the Tab Search button (patches/04-tab-search-folders.patch) the page itself sets the width.
+if (location.search === '?bubble') document.documentElement.style.width = '320px';
 // Slid out over a page: tell folders-edge.ts when the pointer crosses this frame's edges, which it may not see itself.
 if (isPanel && window.parent !== window) {
   document.documentElement.addEventListener('mouseleave', () => window.parent.postMessage('lehko-panel-leave', '*'));

@@ -1,5 +1,5 @@
 diff --git a/components/omnibox/browser/BUILD.gn b/components/omnibox/browser/BUILD.gn
-index 33ab9043..6fa63dca 100644
+index 33ab90430..6fa63dca1 100644
 --- a/components/omnibox/browser/BUILD.gn
 +++ b/components/omnibox/browser/BUILD.gn
 @@ -220,6 +220,7 @@ static_library("browser") {
@@ -11,7 +11,7 @@ index 33ab9043..6fa63dca 100644
      "bookmark_scoring_signals_annotator.h",
      "brave_search_suggestion_parser.cc",
 diff --git a/components/omnibox/browser/bookmark_provider.cc b/components/omnibox/browser/bookmark_provider.cc
-index 19156a5e..0da9bc43 100644
+index 19156a5e0..0da9bc434 100644
 --- a/components/omnibox/browser/bookmark_provider.cc
 +++ b/components/omnibox/browser/bookmark_provider.cc
 @@ -4,6 +4,7 @@
@@ -62,26 +62,29 @@ index 19156a5e..0da9bc43 100644
  
  BookmarkProvider::~BookmarkProvider() = default;
 diff --git a/components/omnibox/browser/history_quick_provider.cc b/components/omnibox/browser/history_quick_provider.cc
-index ea466919..1a232b5a 100644
+index ea466919c..c295fbc30 100644
 --- a/components/omnibox/browser/history_quick_provider.cc
 +++ b/components/omnibox/browser/history_quick_provider.cc
-@@ -4,6 +4,7 @@
+@@ -4,6 +4,8 @@
  
  #include "components/omnibox/browser/history_quick_provider.h"
  
 +#include <iterator>
++#include <memory>
  #include <stddef.h>
  
  #include <algorithm>
-@@ -27,6 +28,7 @@
+@@ -27,6 +29,9 @@
  #include "components/omnibox/browser/autocomplete_match_type.h"
  #include "components/omnibox/browser/autocomplete_provider_client.h"
  #include "components/omnibox/browser/autocomplete_result.h"
 +#include "components/omnibox/browser/keyboard_layout_fix.h"
++#include "components/search_engines/template_url.h"
++#include "components/search_engines/template_url_service.h"
  #include "components/omnibox/browser/autocomplete_scoring_signals_annotator.h"
  #include "components/omnibox/browser/history_url_provider.h"
  #include "components/omnibox/browser/in_memory_url_index.h"
-@@ -77,6 +79,22 @@ void HistoryQuickProvider::Start(const AutocompleteInput& input,
+@@ -77,6 +82,43 @@ void HistoryQuickProvider::Start(const AutocompleteInput& input,
  
    if (in_memory_url_index_) {
      DoAutocomplete();
@@ -100,16 +103,37 @@ index ea466919..1a232b5a 100644
 +      }
 +      matches_.insert(matches_.begin(), std::make_move_iterator(typed.begin()),
 +                      std::make_move_iterator(typed.end()));
++      // Any query can be meant in the other layout, not only what history holds.
++      TemplateURLService* service = client()->GetTemplateURLService();
++      const TemplateURL* engine =
++          service ? service->GetDefaultSearchProvider() : nullptr;
++      if (engine && omnibox::LooksLikeWords(*fixed)) {
++        const TemplateURLRef::SearchTermsArgs args(*fixed);
++        const GURL url(engine->url_ref().ReplaceSearchTerms(
++            args, service->search_terms_data()));
++        if (url.is_valid()) {
++          AutocompleteMatch search(this, 1200, false,
++                                   AutocompleteMatchType::SEARCH_SUGGEST);
++          search.destination_url = url;
++          search.fill_into_edit = *fixed;
++          search.contents = *fixed;
++          search.contents_class = {{0, ACMatchClassification::NONE}};
++          search.keyword = engine->keyword();
++          search.search_terms_args =
++              std::make_unique<TemplateURLRef::SearchTermsArgs>(args);
++          matches_.push_back(std::move(search));
++        }
++      }
 +    }
    }
  }
  
 diff --git a/components/omnibox/browser/keyboard_layout_fix.h b/components/omnibox/browser/keyboard_layout_fix.h
 new file mode 100644
-index 00000000..afe0cf39
+index 000000000..6ba492a49
 --- /dev/null
 +++ b/components/omnibox/browser/keyboard_layout_fix.h
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,133 @@
 +// Copyright 2026 The Lehko Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -117,6 +141,7 @@ index 00000000..afe0cf39
 +#ifndef COMPONENTS_OMNIBOX_BROWSER_KEYBOARD_LAYOUT_FIX_H_
 +#define COMPONENTS_OMNIBOX_BROWSER_KEYBOARD_LAYOUT_FIX_H_
 +
++#include <algorithm>
 +#include <optional>
 +#include <string>
 +#include <string_view>
@@ -191,6 +216,34 @@ index 00000000..afe0cf39
 +    return fixed;
 +  }
 +  return std::nullopt;
++}
++
++// Whether converted text reads like words rather than key noise, so that a typed
++// English query does not also offer `руддщ` and the like. Only letters, spaces and
++// digits, a vowel, and no long run of consonants: 3 for Cyrillic, 4 for Latin.
++inline bool LooksLikeWords(const std::u16string& fixed) {
++  static constexpr std::u16string_view kVowels = u"aeiouyаеєиіїоуюя";
++  size_t letters = 0, run = 0, longest = 0;
++  bool cyrillic = false, vowel = false;
++  for (const char16_t c : fixed) {
++    const bool is_latin = c >= u'a' && c <= u'z';
++    const bool is_cyrillic = c > 0x7f;
++    if (is_latin || is_cyrillic) {
++      ++letters;
++      cyrillic |= is_cyrillic;
++      if (kVowels.find(c) != std::u16string_view::npos) {
++        vowel = true;
++        run = 0;
++      } else {
++        longest = std::max(longest, ++run);
++      }
++    } else if (c == u' ' || (c >= u'0' && c <= u'9')) {
++      run = 0;
++    } else {
++      return false;
++    }
++  }
++  return letters >= 3 && vowel && longest < (cyrillic ? 3u : 4u);
 +}
 +
 +// Whether `fixed` starts the site's host, as `goog` does for www.google.com.

@@ -2,3 +2,4 @@
 01-disable-av1.patch
 02-omnibox-keyboard-layout.patch
 03-builtin-extension.patch
+04-tab-search-folders.patch

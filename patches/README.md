@@ -21,6 +21,8 @@ This directory contains build-time patches and configuration files applied to Ch
 
 5. **`03-builtin-extension.patch`**: loads `Contents/Resources/extension` of the app bundle as a component extension. `ci/package-dmg.sh` copies it there and adds the public key from `ci/builtin-extension.key`, which fixes the extension ID.
 
+6. **`04-tab-search-folders.patch`**: the Tab Search button and its shortcut open the folders of the built-in extension, anchored to the button. Without that extension the button keeps its usual behaviour.
+
 ## Checking patches
 
 Before you dispatch a full build (about a day on free runners), confirm that the series applies to the pinned tag:
