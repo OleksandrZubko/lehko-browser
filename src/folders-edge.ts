@@ -29,8 +29,15 @@
       panel.append(frame);
     }
     panel.classList.add('open');
+    document.addEventListener('mousemove', leftPanel, true);
   };
-  const close = () => panel.classList.remove('open');
+  const close = () => {
+    panel.classList.remove('open');
+    document.removeEventListener('mousemove', leftPanel, true);
+  };
+  // The panel's frame is another process: when the pointer leaves it for the toolbar or another window, or a page
+  // swallows the events, this document may hear nothing. So the frame reports its own edges, and any move past the panel counts.
+  const leftPanel = (event: MouseEvent) => { if (event.clientX > WIDTH) later(close, CLOSE_DELAY); };
 
   // A held button means a drag or text selection reaching the edge, not a request for the panel.
   strip.addEventListener('mouseenter', event => { if (!event.buttons) later(open, OPEN_DELAY); });
@@ -40,6 +47,14 @@
   });
   panel.addEventListener('mouseenter', () => clearTimeout(timer));
   panel.addEventListener('mouseleave', () => later(close, CLOSE_DELAY));
+  document.documentElement.addEventListener('mouseleave', () => { if (panel.classList.contains('open')) later(close, CLOSE_DELAY); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) close(); });
+  window.addEventListener('message', event => {
+    const frame = panel.firstChild as HTMLIFrameElement | null;
+    if (!frame || event.source !== frame.contentWindow) return;
+    if (event.data === 'lehko-panel-leave') later(close, CLOSE_DELAY);
+    else if (event.data === 'lehko-panel-enter') clearTimeout(timer);
+  });
   document.addEventListener('fullscreenchange', () => { host.style.display = document.fullscreenElement ? 'none' : ''; });
 
   const apply = (enabled: unknown) => {

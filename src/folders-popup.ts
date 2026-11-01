@@ -12,6 +12,11 @@ const message = element<HTMLParagraphElement>('folders-message');
 
 // The same script drives the popup and the side panel; only the popup closes after an action.
 const isPanel = location.pathname.endsWith('folders-panel.html');
+// Slid out over a page: tell folders-edge.ts when the pointer crosses this frame's edges, which it may not see itself.
+if (isPanel && window.parent !== window) {
+  document.documentElement.addEventListener('mouseleave', () => window.parent.postMessage('lehko-panel-leave', '*'));
+  document.documentElement.addEventListener('mouseenter', () => window.parent.postMessage('lehko-panel-enter', '*'));
+}
 
 let status: FoldersStatus = { currentId: undefined, folders: [] };
 let windowId: number | undefined;

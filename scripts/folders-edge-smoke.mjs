@@ -62,6 +62,15 @@ try {
 
   await hover(page);
   await until(async () => (await page.evaluate(() => document.elementFromPoint(150, 300)?.tagName)) === 'DIV', 'panel slides out again', 3000);
+  await sleep(250);
+  // The pointer stays over the frame, as when it left for the toolbar: only the frame's own report can close the panel.
+  await page.mouse.move(150, 300);
+  await frame.evaluate(() => document.documentElement.dispatchEvent(new MouseEvent('mouseleave')));
+  await until(async () => (await page.evaluate(() => document.elementFromPoint(150, 300)?.tagName)) !== 'DIV', 'panel closes on the report from its frame', 3000);
+  ok('leaving the frame without the page noticing hides it');
+
+  await hover(page);
+  await until(async () => (await page.evaluate(() => document.elementFromPoint(150, 300)?.tagName)) === 'DIV', 'panel slides out again', 3000);
   await sleep(250); // the slide animation
   await frame.locator('#folders-footer button').click({ timeout: 8000 });
   await frame.locator('#folders-footer input').fill('Збоку');
