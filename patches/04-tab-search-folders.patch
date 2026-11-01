@@ -1,5 +1,5 @@
 diff --git a/chrome/browser/ui/views/tab_search_bubble_host.cc b/chrome/browser/ui/views/tab_search_bubble_host.cc
-index 01a6b7e97..a1477f0fa 100644
+index 01a6b7e9..fd53e23a 100644
 --- a/chrome/browser/ui/views/tab_search_bubble_host.cc
 +++ b/chrome/browser/ui/views/tab_search_bubble_host.cc
 @@ -4,7 +4,14 @@
@@ -32,7 +32,7 @@ index 01a6b7e97..a1477f0fa 100644
 +        extensions::ExtensionViewHostFactory::CreatePopupHost(
 +            *lehko, lehko->ResolveExtensionURL("folders-panel.html?bubble"),
 +            browser_window_interface_),
-+        button_, views::BubbleBorder::TOP_LEFT,
++        views::BubbleAnchor(button_.get()), views::BubbleBorder::TOP_LEFT,
 +        PopupShowAction::kShow, base::DoNothing());
 +    return true;
 +  }
