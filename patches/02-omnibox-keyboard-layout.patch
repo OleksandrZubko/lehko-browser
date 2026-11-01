@@ -1,5 +1,5 @@
 diff --git a/components/omnibox/browser/BUILD.gn b/components/omnibox/browser/BUILD.gn
-index 33ab90430..6fa63dca1 100644
+index 33ab9043..6fa63dca 100644
 --- a/components/omnibox/browser/BUILD.gn
 +++ b/components/omnibox/browser/BUILD.gn
 @@ -220,6 +220,7 @@ static_library("browser") {
@@ -11,7 +11,7 @@ index 33ab90430..6fa63dca1 100644
      "bookmark_scoring_signals_annotator.h",
      "brave_search_suggestion_parser.cc",
 diff --git a/components/omnibox/browser/bookmark_provider.cc b/components/omnibox/browser/bookmark_provider.cc
-index 19156a5e0..0da9bc434 100644
+index 19156a5e..0da9bc43 100644
 --- a/components/omnibox/browser/bookmark_provider.cc
 +++ b/components/omnibox/browser/bookmark_provider.cc
 @@ -4,6 +4,7 @@
@@ -62,7 +62,7 @@ index 19156a5e0..0da9bc434 100644
  
  BookmarkProvider::~BookmarkProvider() = default;
 diff --git a/components/omnibox/browser/history_quick_provider.cc b/components/omnibox/browser/history_quick_provider.cc
-index ea466919c..c295fbc30 100644
+index ea466919..3f16e288 100644
 --- a/components/omnibox/browser/history_quick_provider.cc
 +++ b/components/omnibox/browser/history_quick_provider.cc
 @@ -4,6 +4,8 @@
@@ -113,7 +113,7 @@ index ea466919c..c295fbc30 100644
 +            args, service->search_terms_data()));
 +        if (url.is_valid()) {
 +          AutocompleteMatch search(this, 1200, false,
-+                                   AutocompleteMatchType::SEARCH_SUGGEST);
++                                   omnibox::AutocompleteMatchType::kSearchSuggest);
 +          search.destination_url = url;
 +          search.fill_into_edit = *fixed;
 +          search.contents = *fixed;
@@ -130,7 +130,7 @@ index ea466919c..c295fbc30 100644
  
 diff --git a/components/omnibox/browser/keyboard_layout_fix.h b/components/omnibox/browser/keyboard_layout_fix.h
 new file mode 100644
-index 000000000..6ba492a49
+index 00000000..6ba492a4
 --- /dev/null
 +++ b/components/omnibox/browser/keyboard_layout_fix.h
 @@ -0,0 +1,133 @@
