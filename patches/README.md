@@ -17,7 +17,7 @@ This directory contains build-time patches and configuration files applied to Ch
    - Patches `IsDecoderAV1Supported()` in `media/base/supported_types.cc`, so macOS no longer reports AV1 decode support to web pages.
    - Apple Silicon M1/M2 have no AV1 hardware decoder, so sites such as YouTube fall back to hardware-decoded VP9 / H.264. The CPU saving has not been measured in this build yet.
 
-4. **`02-omnibox-keyboard-layout.patch`**: the address bar also matches history and bookmarks, by title and URL, for the same keys in the other layout: `пщщпдуюсщь` finds `google.com`, `yjdbyb` finds pages titled `новини`. A site whose host starts with the converted text (at least 3 keys) leads the list and takes Enter, as `goog` does; other matches only add to the list.
+4. **`02-omnibox-keyboard-layout.patch`**: the address bar also matches history and bookmarks, by title and URL, for the same keys in the other layout: `пщщпдуюсщь` finds `google.com`, `yjdbyb` finds pages titled `новини`. A site whose host starts with the converted text (at least 3 keys) leads the list and takes Enter, as `goog` does; other matches only add to the list. Without history, a converted address (`пщщпдуюсщь`) or the start of a site from a short built-in list (`нщгегиу`) is offered too, and takes Enter unless the typed text itself reads like words. `tests/keyboard-layout.test.mjs` compiles the conversion header on its own.
 
 5. **`03-builtin-extension.patch`**: loads `Contents/Resources/extension` of the app bundle as a component extension. `ci/package-dmg.sh` copies it there and adds the public key from `ci/builtin-extension.key`, which fixes the extension ID.
 
