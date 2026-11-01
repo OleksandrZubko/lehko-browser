@@ -11,7 +11,7 @@ index 33ab9043..6fa63dca 100644
      "bookmark_scoring_signals_annotator.h",
      "brave_search_suggestion_parser.cc",
 diff --git a/components/omnibox/browser/bookmark_provider.cc b/components/omnibox/browser/bookmark_provider.cc
-index 19156a5e..7457889f 100644
+index 19156a5e..0da9bc43 100644
 --- a/components/omnibox/browser/bookmark_provider.cc
 +++ b/components/omnibox/browser/bookmark_provider.cc
 @@ -4,6 +4,7 @@
@@ -52,7 +52,7 @@ index 19156a5e..7457889f 100644
 +    DoAutocomplete(fixed_input);
 +    for (AutocompleteMatch& match : matches_) {
 +      match.allowed_to_be_default_match = omnibox::IsHostPrefix(
-+          match.destination_url.host_piece(), *fixed);
++          match.destination_url.host(), *fixed);
 +      match.inline_autocompletion.clear();
 +    }
 +    matches_.insert(matches_.begin(), std::make_move_iterator(typed.begin()),
@@ -62,7 +62,7 @@ index 19156a5e..7457889f 100644
  
  BookmarkProvider::~BookmarkProvider() = default;
 diff --git a/components/omnibox/browser/history_quick_provider.cc b/components/omnibox/browser/history_quick_provider.cc
-index ea466919..9062d367 100644
+index ea466919..1a232b5a 100644
 --- a/components/omnibox/browser/history_quick_provider.cc
 +++ b/components/omnibox/browser/history_quick_provider.cc
 @@ -4,6 +4,7 @@
@@ -95,7 +95,7 @@ index ea466919..9062d367 100644
 +      DoAutocomplete();
 +      for (AutocompleteMatch& match : matches_) {
 +        match.allowed_to_be_default_match = omnibox::IsHostPrefix(
-+            match.destination_url.host_piece(), *fixed);
++            match.destination_url.host(), *fixed);
 +        match.inline_autocompletion.clear();
 +      }
 +      matches_.insert(matches_.begin(), std::make_move_iterator(typed.begin()),

@@ -35,6 +35,13 @@ for p in "${PATCHES[@]}"; do
     fi
   elif git apply --reverse --check -p1 "$PATCH_DIR/$p" 2>/dev/null; then
     echo "Already applied $p"
+  elif [[ "$MODE" != "--check" ]]; then
+    # A resumed tree may hold an older version of this patch: go back to the tag for its files.
+    echo "Replacing an older version of $p"
+    while IFS= read -r file; do
+      git checkout HEAD -- "$file" 2>/dev/null || rm -f "$file"
+    done < <(sed -n 's|^+++ b/||p' "$PATCH_DIR/$p" | cut -f1)
+    git apply -p1 "$PATCH_DIR/$p"
   else
     git apply --check -p1 "$PATCH_DIR/$p"
     exit 1
