@@ -106,10 +106,10 @@ index ea466919..9062d367 100644
  
 diff --git a/components/omnibox/browser/keyboard_layout_fix.h b/components/omnibox/browser/keyboard_layout_fix.h
 new file mode 100644
-index 00000000..e1092f87
+index 00000000..afe0cf39
 --- /dev/null
 +++ b/components/omnibox/browser/keyboard_layout_fix.h
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,104 @@
 +// Copyright 2026 The Lehko Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -144,24 +144,53 @@ index 00000000..e1092f87
 +  return 0;
 +}
 +
-+// `пщщпдуюсщь` -> `google.com`: the same keys pressed in the wrong layout.
-+// Returns nothing unless the text has at least two letters to convert.
++// The Ukrainian letter on the same key as a Latin character, or 0.
++inline char16_t UkrainianOnSameKey(char16_t c) {
++  static constexpr char16_t kLatin[] = u"qwertyuiop[]asdfghjkl;'zxcvbnm,.`";
++  static constexpr char16_t kUkrainian[] =
++      u"йцукенгшщзхїфівапролджєячсмитьбюґ";
++  if (c >= u'A' && c <= u'Z') {
++    c += u'a' - u'A';
++  }
++  for (size_t i = 0; kLatin[i]; ++i) {
++    if (kLatin[i] == c) {
++      return kUkrainian[i];
++    }
++  }
++  return 0;
++}
++
++// The same keys pressed in the other layout, both ways: `пщщпдуюсщь` gives
++// `google.com` and `yjdbyb` gives `новини`. Returns nothing for mixed text, for
++// fewer than two converted letters and for anything that already looks like a URL.
 +inline std::optional<std::u16string> FixKeyboardLayout(
 +    const std::u16string& text) {
 +  std::u16string fixed = text;
-+  size_t converted = 0;
++  size_t to_latin = 0, to_ukrainian = 0;
 +  for (char16_t& c : fixed) {
 +    if (const char16_t latin = LatinOnSameKey(c)) {
 +      c = latin;
-+      ++converted;
++      ++to_latin;
 +    } else if (c > 0x7f) {
 +      return std::nullopt;
++    } else if (c == u'/' || c == u':') {
++      return std::nullopt;
++    } else if ((c >= u'a' && c <= u'z') || (c >= u'A' && c <= u'Z')) {
++      ++to_ukrainian;
 +    }
 +  }
-+  if (converted < 2) {
-+    return std::nullopt;
++  if (to_latin >= 2 && to_ukrainian == 0) {
++    return fixed;
 +  }
-+  return fixed;
++  if (to_latin == 0 && to_ukrainian >= 2) {
++    for (char16_t& c : fixed) {
++      if (const char16_t ukrainian = UkrainianOnSameKey(c)) {
++        c = ukrainian;
++      }
++    }
++    return fixed;
++  }
++  return std::nullopt;
 +}
 +
 +// Whether `fixed` starts the site's host, as `goog` does for www.google.com.
