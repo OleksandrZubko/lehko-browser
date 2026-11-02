@@ -129,15 +129,6 @@ try {
   await until(async () => (await windowUrls(b)).includes(page(9)), 'sent tab opens on B');
   ok('a sent tab opens on the addressed device');
 
-  const kdf = await a.popup.evaluate(async () => {
-    const started = performance.now();
-    const hash = await hashwasm.argon2id({ password: 'x'.repeat(16), salt: new Uint8Array(16), parallelism: 1, iterations: 3, memorySize: 65536, hashLength: 32, outputType: 'hex' });
-    return { hash, ms: Math.round(performance.now() - started), flow: typeof chrome.identity?.launchWebAuthFlow };
-  });
-  assert.equal(kdf.hash.length, 64);
-  assert.equal(kdf.flow, 'function');
-  ok(`Argon2id runs under the extension CSP (${kdf.ms} ms); identity API is present`);
-
   await a.popup.reload();
   await a.popup.locator('#sync-details summary').click();
   await until(() => a.popup.locator('.sync-device').count(), 'popup device list');

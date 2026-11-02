@@ -106,35 +106,6 @@ export class Vault {
   }
 }
 
-// ---- passphrase wrap: the account secret stored for a Google identity ----
-export interface KdfParams { memoryKiB: number; iterations: number; }
-export const KDF_DEFAULT: KdfParams = { memoryKiB: 65_536, iterations: 3 };
-export interface KeyBlob extends KdfParams { v: 1; salt: string; data: string; }
-const WRAP_AAD = 'wrap|v1';
-
-// A server cannot weaken the derivation (below the floor) or hang the popup (above the ceiling).
-export function checkKeyBlob(value: unknown): KeyBlob {
-  const blob = value as KeyBlob | null;
-  if (!blob || blob.v !== 1 || typeof blob.salt !== 'string' || typeof blob.data !== 'string' ||
-    !Number.isInteger(blob.memoryKiB) || !Number.isInteger(blob.iterations) || fromB64(blob.salt).length !== 16 ||
-    blob.memoryKiB < KDF_DEFAULT.memoryKiB || blob.memoryKiB > 262_144 || blob.iterations < KDF_DEFAULT.iterations || blob.iterations > 10) {
-    throw new Error('Некоректний ключ на сервері');
-  }
-  return blob;
-}
-export function checkPassphrase(value: unknown): string {
-  const text = typeof value === 'string' ? value : '';
-  if ([...text].length < 12) throw new Error('Фраза має містити щонайменше 12 символів');
-  if (new Set(text).size < 6) throw new Error('Фраза занадто проста');
-  return text;
-}
-export async function wrapSecret(kek: Uint8Array<ArrayBuffer>, salt: string, params: KdfParams, secret: Uint8Array<ArrayBuffer>): Promise<KeyBlob> {
-  return { v: 1, salt, memoryKiB: params.memoryKiB, iterations: params.iterations, data: await sealBytes(await aesKey(kek), secret, WRAP_AAD) };
-}
-export async function unwrapSecret(kek: Uint8Array<ArrayBuffer>, blob: KeyBlob): Promise<Uint8Array<ArrayBuffer>> {
-  try { return await openBytes(await aesKey(kek), blob.data, WRAP_AAD); } catch { throw new Error('Неправильна фраза синхронізації'); }
-}
-
 // ---- pairing: a 130-bit code from the old device carries the account secret through a one-time mailbox ----
 function encodeCode(bytes: Uint8Array): string {
   let bits = 0, value = 0, out = '';

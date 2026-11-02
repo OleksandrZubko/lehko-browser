@@ -1,8 +1,4 @@
-import { KDF_DEFAULT, checkKeyBlob, checkPassphrase, toB64, type KdfParams } from './sync-crypto.js';
 import type { SyncRequest, SyncStatus } from './sync.js';
-
-// Global of the vendored hash-wasm build (extension/vendor).
-declare const hashwasm: { argon2id(options: { password: string; salt: Uint8Array; parallelism: number; iterations: number; memorySize: number; hashLength: number; outputType: 'binary' }): Promise<Uint8Array> };
 
 function element<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -46,48 +42,7 @@ function field(type: string, placeholder: string, value = ''): HTMLInputElement 
   return el('input', { type, placeholder, value, required: true, autocomplete: 'off', spellcheck: false });
 }
 
-async function deriveKek(passphrase: string, salt: Uint8Array, params: KdfParams): Promise<string> {
-  const kek = await hashwasm.argon2id({ password: passphrase.normalize('NFKC'), salt, parallelism: 1, iterations: params.iterations, memorySize: params.memoryKiB, hashLength: 32, outputType: 'binary' });
-  return toB64(kek);
-}
-
-// After Google sign-in: a new passphrase for the first device, the existing one for the others.
-function passphraseForm(): HTMLElement {
-  const google = status.google!;
-  const device = status.enabled ? null : field('text', 'Назва пристрою', 'Мій Mac');
-  const first = field('password', 'Фраза синхронізації');
-  const second = google.hasKey ? null : field('password', 'Повторіть фразу');
-  const submit = el('button', { type: 'submit', className: 'primary', textContent: google.hasKey ? 'Відкрити дані' : 'Зберегти фразу' });
-  const form = el('form', {}, ...(device ? [device] : []), first, ...(second ? [second] : []), submit,
-    button('Скасувати', () => { void send({ type: 'sync-google-cancel' }); }));
-  form.addEventListener('submit', event => {
-    event.preventDefault();
-    submit.disabled = true;
-    void (async () => {
-      try {
-        const deviceName = device?.value ?? status.deviceName ?? '';
-        if (google.blob) {
-          const blob = checkKeyBlob(google.blob);
-          const kek = await deriveKek(first.value, Uint8Array.from(atob(blob.salt.replaceAll('-', '+').replaceAll('_', '/')), c => c.charCodeAt(0)), blob);
-          await send({ type: 'sync-google-unlock', kek, deviceName });
-        } else {
-          const passphrase = checkPassphrase(first.value);
-          if (passphrase !== second?.value) throw new Error('Фрази не збігаються');
-          const salt = crypto.getRandomValues(new Uint8Array(16));
-          await send({ type: 'sync-google-setup', kek: await deriveKek(passphrase, salt, KDF_DEFAULT), salt: toB64(salt), params: KDF_DEFAULT, deviceName });
-        }
-      } catch (error) {
-        message.textContent = error instanceof Error ? error.message : 'Операція не виконана.';
-      } finally { submit.disabled = false; }
-    })();
-  });
-  return el('div', {}, el('p', { className: 'hint', textContent: google.hasKey
-    ? 'Введіть фразу, задану на першому пристрої. Google її не знає, сервер теж.'
-    : 'Придумайте фразу щонайменше з 12 символів. Її ніхто не зможе відновити: забудете фразу, і дані на сервері стануть недоступні новим пристроям.' }), form);
-}
-
 function setup(): HTMLElement {
-  if (status.google) return passphraseForm();
   const server = field('url', 'https://адреса-сервера', DEFAULT_SERVER);
   const device = field('text', 'Назва пристрою', 'Мій Mac');
   const secret = field(mode === 'create' ? 'password' : 'text', mode === 'create' ? 'Інвайт-код сервера' : 'Код з іншого пристрою');
@@ -100,8 +55,8 @@ function setup(): HTMLElement {
       ? { type: 'sync-create', server: server.value, invite: secret.value, deviceName: device.value }
       : { type: 'sync-join', server: server.value, code: secret.value, deviceName: device.value });
   });
-  const google = button('Увійти через Google', () => { void send({ type: 'sync-google-login', server: server.value }); }, 'primary');
-  return el('div', {}, el('p', { className: 'hint', textContent: 'Папки, групи й відкриті вкладки шифруються на цьому пристрої. Сервер бачить лише шифротекст. Google лише підтверджує вхід, дані відкриває ваша фраза.' }),
+  const google = button('Увійти через Google', () => { void send({ type: 'sync-google-login', server: server.value, deviceName: device.value }); }, 'primary');
+  return el('div', {}, el('p', { className: 'hint', textContent: 'Папки, групи й відкриті вкладки синхронізуються між вашими пристроями. Увійдіть через Google, і все.' }),
     google, el('details', {}, el('summary', { textContent: 'Без Google: інвайт або код пристрою' }), form));
 }
 
@@ -138,8 +93,7 @@ function linked(): HTMLElement {
     box.append(el('p', { className: 'hint', textContent: 'Введіть цей код на новому пристрої протягом 10 хвилин. Код дає повний доступ до даних.' }),
       el('div', { className: 'sync-code', textContent: status.code }));
   }
-  if (status.google) box.append(passphraseForm());
-  else if (!status.linked) box.append(button('Прив’язати до Google', () => { void send({ type: 'sync-google-login', server: status.server ?? DEFAULT_SERVER }); }));
+  if (!status.linked) box.append(button('Прив’язати до Google', () => { void send({ type: 'sync-google-login', server: status.server ?? DEFAULT_SERVER }); }));
   box.append(el('div', { className: 'sync-actions' },
     button('Додати пристрій', () => { void send({ type: 'sync-pair' }); }),
     button('Синхронізувати', () => { void send({ type: 'sync-now' }); })));

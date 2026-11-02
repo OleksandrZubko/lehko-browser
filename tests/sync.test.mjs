@@ -1,12 +1,10 @@
-import { argon2id } from 'hash-wasm';
-import { KDF_DEFAULT, checkKeyBlob, checkPassphrase, toB64 } from '../dist/sync-crypto.js';
 import { Identity as IdentityClass } from '../sync-server/src/index.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import worker, { Account, Pair } from '../sync-server/src/index.js';
 import { Sync } from '../dist/sync.js';
-import { Vault, randomSecret } from '../dist/sync-crypto.js';
+import { Vault, randomSecret, toB64 } from '../dist/sync-crypto.js';
 import { applyRemote, diffLocal, isSyncableUrl, keyOf, massDeletion, cleanPlain } from '../dist/sync-model.js';
 import { Folders } from '../dist/folders.js';
 
@@ -479,59 +477,52 @@ function googleDevice(server, name, folders = [], claims = {}, redirectHost = 'c
   } };
   return Object.assign(device, { session });
 }
-const PASS = 'довга фраза синхронізації 42';
-async function kekFor(passphrase, salt, params) {
-  const hash = await argon2id({ password: passphrase.normalize('NFKC'), salt, parallelism: 1, iterations: params.iterations, memorySize: params.memoryKiB, hashLength: 32, outputType: 'binary' });
-  return toB64(hash);
-}
-const saltBytes = salt => Uint8Array.from(atob(salt.replaceAll('-', '+').replaceAll('_', '/')), c => c.charCodeAt(0));
-async function googleSetup(device, passphrase = PASS) {
-  await device.request({ type: 'sync-google-login', server: URL_BASE });
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  return device.request({ type: 'sync-google-setup', kek: await kekFor(passphrase, salt, KDF_DEFAULT), salt: toB64(salt), params: KDF_DEFAULT, deviceName: device.name });
-}
-async function googleUnlock(device, passphrase = PASS) {
-  const { google } = await device.request({ type: 'sync-google-login', server: URL_BASE });
-  return device.request({ type: 'sync-google-unlock', kek: await kekFor(passphrase, saltBytes(google.blob.salt), google.blob), deviceName: device.name });
-}
+const googleLogin = device => device.request({ type: 'sync-google-login', server: URL_BASE, deviceName: 'Mac' });
 
-test('Google + passphrase: a second device gets the data with no code and no invite', { timeout: 30_000 }, async () => {
+test('Google alone: a second device gets the data with no code, no invite and no phrase', { timeout: 30_000 }, async () => {
   const server = googleServer();
   const a = googleDevice(server, 'A', [folder('f', 'Робота', ['https://a.example/1'])]);
   const b = googleDevice(server, 'B');
-  const created = await googleSetup(a);
+  const created = await googleLogin(a);
   assert.equal(created.enabled, true);
   assert.equal(created.linked, true);
-  await assert.rejects(googleUnlock(b, 'зовсім інша фраза 123'), /Неправильна фраза/);
-  assert.equal((await b.request({ type: 'sync-status' })).enabled, false, 'a wrong passphrase enables nothing');
-  await googleUnlock(b);
+  await googleLogin(b);
   await settle(a, b);
   assert.deepEqual(shape(b.store), shape(a.store));
     assert.equal([...server.env.IDENTITY.objects.keys()].some(k => k.includes('google-user-1')), false, 'only a hash of the subject');
 });
 
-test('an existing chain can be linked; a stored key is never overwritten', { timeout: 30_000 }, async () => {
+test('an existing chain keeps its key when linked, and later sign-ins join it', { timeout: 30_000 }, async () => {
   const server = googleServer();
   const a = googleDevice(server, 'A', [folder('f', 'x', ['https://a.example/'])]);
   await create(a);
-  const linked = await googleSetup(a);
-  assert.equal(linked.linked, true);
+  assert.equal((await googleLogin(a)).linked, true);
   const c = googleDevice(server, 'C');
-  await c.request({ type: 'sync-google-login', server: URL_BASE });
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  await assert.rejects(c.request({ type: 'sync-google-setup', kek: await kekFor(PASS, salt, KDF_DEFAULT), salt: toB64(salt), params: KDF_DEFAULT, deviceName: 'C' }), /ключ уже збережено/);
-  const token = await googleToken();
-  const put = await server.http(`${URL_BASE}/v1/identity`, { method: 'POST', body: JSON.stringify({ token, op: 'put', blob: '{"evil":1}' }) });
-  assert.equal(put.status, 409);
+  await googleLogin(c);
+  await settle(a, c);
+  assert.deepEqual(shape(c.store), shape(a.store));
+  const other = googleDevice(server, 'D', [folder('g', 'y', ['https://d.example/'])]);
+  await create(other);
+  await assert.rejects(googleLogin(other), /уже має інші дані/);
+  assert.equal((await other.request({ type: 'sync-status' })).linked ?? false, false, 'a device on another chain is not linked');
 });
 
-test('wipe also removes the wrapped key', { timeout: 30_000 }, async () => {
+test('builds that still wrap the key with a passphrase keep working', async () => {
+  const server = googleServer();
+  const token = await googleToken();
+  const call = async body => server.http(`${URL_BASE}/v1/identity`, { method: 'POST', body: JSON.stringify({ token, ...body }) });
+  assert.equal((await call({ op: 'put', blob: '{"v":1}' })).status, 200);
+  assert.equal((await call({ op: 'put', blob: '{"evil":1}' })).status, 409);
+  assert.equal((await (await call({ op: 'get' })).json()).blob, '{"v":1}');
+});
+
+test('wipe also removes the stored key', { timeout: 30_000 }, async () => {
   const server = googleServer();
   const a = googleDevice(server, 'A', []);
-  await googleSetup(a);
+  await googleLogin(a);
   await a.request({ type: 'sync-wipe' });
-  const b = googleDevice(server, 'B');
-  assert.equal((await b.request({ type: 'sync-google-login', server: URL_BASE })).google.hasKey, false);
+  const claim = await server.http(`${URL_BASE}/v1/identity`, { method: 'POST', body: JSON.stringify({ token: await googleToken(), op: 'claim', secret: 'next' }) });
+  assert.equal((await claim.json()).secret, 'next');
 });
 
 test('tokens: wrong signature, audience, issuer, expiry, e-mail and algorithm are refused', async () => {
@@ -562,20 +553,9 @@ test('sign-in response is bound to the request and delivered only to chromiumapp
   const unknown = new URLSearchParams({ id_token: 'x.y.z', state: `${EXT}.x.${'s'.repeat(20)}` });
   assert.equal((await server.http(`${URL_BASE}/v1/google/callback`, { method: 'POST', body: unknown })).status, 400);
   const stock = googleDevice(server, 'Stock', [], {}, 'chromiumapp.org');
-  assert.equal((await stock.request({ type: 'sync-google-login', server: URL_BASE })).google.hasKey, false);
+  assert.equal((await googleLogin(stock)).enabled, true);
   const form = new URLSearchParams({ id_token: 'x.y.z', state: 'evil.example/#.ssssssssssssssssssss' });
   assert.equal((await server.http(`${URL_BASE}/v1/google/callback`, { method: 'POST', body: form })).status, 400);
-});
-
-test('a server cannot weaken the passphrase derivation; weak phrases are refused', () => {
-  const blob = { v: 1, salt: toB64(new Uint8Array(16)), data: 'x', ...KDF_DEFAULT };
-  assert.ok(checkKeyBlob(blob));
-  assert.throws(() => checkKeyBlob({ ...blob, memoryKiB: 8 }));
-  assert.throws(() => checkKeyBlob({ ...blob, iterations: 1 }));
-  assert.throws(() => checkKeyBlob({ ...blob, memoryKiB: 10_000_000 }));
-  assert.throws(() => checkPassphrase('short'));
-  assert.throws(() => checkPassphrase('aaaaaaaaaaaaaaaaaaaa'));
-  assert.ok(checkPassphrase(PASS));
 });
 
 test('pinned tabs survive remote changes and a join merge', async () => {

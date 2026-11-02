@@ -1,4 +1,4 @@
-import { Vault, checkKeyBlob, fromB64, newPairing, openPairing, pairingFromCode, randomId, randomSecret, sealPairing, toB64, unwrapSecret, wrapSecret, type KdfParams, type KeyBlob, type SealedRecord } from './sync-crypto.js';
+import { Vault, fromB64, newPairing, openPairing, pairingFromCode, randomId, randomSecret, sealPairing, toB64, type SealedRecord } from './sync-crypto.js';
 import { unwrapLazy } from './lazy-tab.js';
 import { applyRemote, cleanPlain, diffLocal, formatHlc, isSyncableUrl, keyOf, massDeletion, mergeOnJoin, observe, tick,
   type Change, type Clock, type DeviceRecord, type DeviceTab, type FolderData, type Plain, type SendRecord, type Shadow } from './sync-model.js';
@@ -26,21 +26,17 @@ interface SyncState {
   lastSync?: number; lastError?: string; held?: Held; allowMass?: boolean; skipped?: number;
   linked?: boolean; googleToken?: string;
 }
-// A signed-in Google session waits here for the passphrase: the popup closes when the sign-in window opens.
-interface GoogleSession { server: string; token: string; expires: number; blob: KeyBlob | null; }
+// A signed-in Google session: the wipe reuses its token instead of asking to sign in again.
+interface GoogleSession { server: string; token: string; expires: number; }
 export interface SyncDevice { id: string; name: string; at: number; tabs: DeviceTab[]; }
 export interface SyncStatus {
   enabled: boolean; server?: string; deviceName?: string; lastSync?: number; lastError?: string;
   held?: Held; skipped?: number; devices: SyncDevice[]; code?: string; linked?: boolean;
-  google?: { hasKey: boolean; blob?: KeyBlob };
 }
 export type SyncRequest = { type: 'sync-status' }
   | { type: 'sync-create'; server: string; invite: string; deviceName: string }
   | { type: 'sync-join'; server: string; code: string; deviceName: string }
-  | { type: 'sync-google-login'; server: string }
-  | { type: 'sync-google-cancel' }
-  | { type: 'sync-google-setup'; kek: string; salt: string; params: KdfParams; deviceName: string }
-  | { type: 'sync-google-unlock'; kek: string; deviceName: string }
+  | { type: 'sync-google-login'; server: string; deviceName?: string }
   | { type: 'sync-pair' } | { type: 'sync-now' } | { type: 'sync-confirm' } | { type: 'sync-reject' }
   | { type: 'sync-leave' } | { type: 'sync-wipe' }
   | { type: 'sync-send'; deviceId: string; url: string; title: string }
@@ -283,15 +279,13 @@ export class Sync {
   // ---- popup ----
   private async status(code?: string): Promise<SyncStatus> {
     const state = await this.read();
-    const session = await this.googleSession();
-    const google = session ? { google: { hasKey: Boolean(session.blob), ...(session.blob ? { blob: session.blob } : {}) } } : {};
-    if (!state) return { enabled: false, devices: [], ...google };
+    if (!state) return { enabled: false, devices: [] };
     const devices = Object.values(state.shadow).flatMap(item => {
       const v = item.v;
       if (v?.k !== 'device' || v.id === state.deviceId || Date.now() - v.at > DEVICE_VISIBLE_MS) return [];
       return [{ id: v.id, name: v.name, at: v.at, tabs: v.tabs }];
     }).sort((a, b) => b.at - a.at);
-    return { enabled: true, server: state.server, deviceName: state.deviceName, devices, ...google, ...(state.linked ? { linked: true } : {}),
+    return { enabled: true, server: state.server, deviceName: state.deviceName, devices, ...(state.linked ? { linked: true } : {}),
       ...(state.lastSync ? { lastSync: state.lastSync } : {}), ...(state.lastError ? { lastError: state.lastError } : {}),
       ...(state.held ? { held: state.held } : {}), ...(state.skipped ? { skipped: state.skipped } : {}), ...(code ? { code } : {}) };
   }
@@ -301,7 +295,7 @@ export class Sync {
       joined, outbox: [], ...(invite ? { invite } : {}) };
   }
 
-  // ---- Google: identity only; the wrapped key still needs the passphrase ----
+  // ---- Google: the sign-in alone gets the account secret from the server ----
   private async googleSession(): Promise<GoogleSession | undefined> {
     const { syncGoogle } = await this.api.storage.session.get('syncGoogle') as { syncGoogle?: GoogleSession };
     if (!syncGoogle) return undefined;
@@ -310,12 +304,12 @@ export class Sync {
     return undefined;
   }
 
-  private async identity(server: string, token: string, op: 'get' | 'put' | 'delete', blob?: KeyBlob): Promise<{ blob?: string | null }> {
+  private async identity(server: string, token: string, op: 'claim' | 'delete', secret?: string): Promise<{ secret?: string }> {
     const response = await this.http(`${server}/v1/identity`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, op, ...(blob ? { blob: JSON.stringify(blob) } : {}) })
+      body: JSON.stringify({ token, op, ...(secret ? { secret } : {}) })
     });
-    const data = await response.json().catch(() => ({})) as { blob?: string | null; error?: string };
+    const data = await response.json().catch(() => ({})) as { secret?: string; error?: string };
     if (!response.ok) throw new Error(data.error ?? `Сервер відповів ${response.status}`);
     return data;
   }
@@ -332,15 +326,8 @@ export class Sync {
     if (!token) throw new Error('Вхід скасовано');
     const claims = JSON.parse(new TextDecoder().decode(fromB64(token.split('.')[1] ?? ''))) as { nonce?: string; exp?: number };
     if (claims.nonce !== nonce) throw new Error('Відповідь входу не збігається із запитом');
-    const { blob } = await this.identity(server, token, 'get');
-    const session: GoogleSession = { server, token, expires: (claims.exp ?? 0) * 1000, blob: blob ? checkKeyBlob(JSON.parse(blob)) : null };
+    const session: GoogleSession = { server, token, expires: (claims.exp ?? 0) * 1000 };
     await this.api.storage.session.set({ syncGoogle: session });
-    return session;
-  }
-
-  private async requireGoogle(): Promise<GoogleSession> {
-    const session = await this.googleSession();
-    if (!session) throw new Error('Спочатку увійдіть через Google');
     return session;
   }
 
@@ -374,47 +361,29 @@ export class Sync {
         await this.run();
         return this.status();
       }
+      // Google is the only lock: the server keeps the account secret and hands it to this account's every sign-in.
       case 'sync-google-login': {
         const current = await this.read();
-        await this.googleSignIn(current?.server ?? cleanServer(message.server));
-        await this.api.action.openPopup?.().catch(() => {}); // the sign-in window closed the popup
-        return this.status();
-      }
-      case 'sync-google-cancel':
-        await this.api.storage.session.remove('syncGoogle');
-        return this.status();
-      case 'sync-google-setup': {
-        const session = await this.requireGoogle();
-        if (session.blob) throw new Error('Для цього акаунта ключ уже збережено');
-        const current = await this.read();
-        const secret = current ? fromB64(current.secret) : randomSecret();
-        const blob = checkKeyBlob(await wrapSecret(fromB64(message.kek), message.salt, message.params, secret));
-        if (!current) {
-          const state = this.fresh(session.server, secret, cleanName(message.deviceName), false);
-          state.googleToken = session.token;
+        const server = current?.server ?? cleanServer(message.server);
+        const { token } = await this.googleSignIn(server);
+        const { secret } = await this.identity(server, token, 'claim', current?.secret ?? toB64(randomSecret()));
+        if (!secret) throw new Error('Сервер не повернув ключ');
+        if (current) {
+          if (secret !== current.secret) throw new Error('Цей акаунт Google уже має інші дані. Вийдіть на цьому пристрої й увійдіть знову.');
+          await this.locked(async () => {
+            const state = await this.read();
+            if (state) { state.linked = true; await this.write(state); }
+          });
+        } else {
+          const state = this.fresh(server, fromB64(secret), cleanName(message.deviceName), false);
+          state.googleToken = token;
+          state.linked = true;
           await this.start(state);
           await this.run();
           const started = await this.read();
           if (started?.lastError && !started.lastSync) { const failed = started.lastError; await this.stop(); throw new Error(failed); }
         }
-        await this.identity(session.server, session.token, 'put', blob);
-        await this.locked(async () => {
-          const state = await this.read();
-          if (state) { state.linked = true; await this.write(state); }
-        });
-        await this.api.storage.session.remove('syncGoogle');
-        return this.status();
-      }
-      case 'sync-google-unlock': {
-        if (await this.read()) throw new Error('Синхронізацію вже ввімкнено');
-        const session = await this.requireGoogle();
-        if (!session.blob) throw new Error('Для цього акаунта ключа ще немає');
-        const secret = await unwrapSecret(fromB64(message.kek), session.blob);
-        const state = this.fresh(session.server, secret, cleanName(message.deviceName), false);
-        state.linked = true;
-        await this.start(state);
-        await this.api.storage.session.remove('syncGoogle');
-        await this.run();
+        await this.api.action.openPopup?.().catch(() => {}); // the sign-in window closed the popup
         return this.status();
       }
       case 'sync-pair': {
@@ -441,7 +410,7 @@ export class Sync {
       case 'sync-wipe': {
         const state = await this.read();
         if (!state) throw new Error('Синхронізацію не ввімкнено');
-        // The wrapped key goes too, or the next sign-in would unlock an account that no longer exists.
+        // The stored key goes too, or the next sign-in would open an account that no longer exists.
         const session = state.linked ? await this.googleSession() ?? await this.googleSignIn(state.server) : undefined;
         await this.post(state, '/v1/wipe', 'POST', '{}');
         if (session) await this.identity(state.server, session.token, 'delete');

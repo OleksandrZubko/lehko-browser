@@ -1,4 +1,4 @@
-// Легко Sync: stores end-to-end encrypted blobs only. See sync-server/README.md.
+// Легко Sync: stores encrypted records, and the key to them for Google accounts. See sync-server/README.md.
 import { AccountStore, HttpError } from './store.js';
 
 const MAX_BODY = 2_000_000;
@@ -48,7 +48,7 @@ async function sameSecret(given, expected) {
   return a.every((byte, i) => byte === b[i]);
 }
 
-// ---- Google sign-in: it proves who may fetch the wrapped key; it never unlocks anything ----
+// ---- Google sign-in: it is the only thing that guards the account key of that Google account ----
 const GOOGLE_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_KEYS = 'https://www.googleapis.com/oauth2/v3/certs';
 const GOOGLE_ISSUERS = new Set(['https://accounts.google.com', 'accounts.google.com']);
@@ -152,9 +152,10 @@ export default {
         let input;
         try { input = JSON.parse(body); } catch { throw new HttpError(400, 'Invalid JSON'); }
         const subject = await verifyGoogle(input.token, env, now);
-        if (!['get', 'put', 'delete'].includes(input.op)) throw new HttpError(400, 'Invalid operation');
+        if (!['get', 'put', 'delete', 'claim'].includes(input.op)) throw new HttpError(400, 'Invalid operation');
         if (input.op === 'put' && (typeof input.blob !== 'string' || !input.blob || input.blob.length > MAX_KEY_BLOB)) throw new HttpError(400, 'Invalid key blob');
-        return await rpc(env.IDENTITY.get(env.IDENTITY.idFromName(subject)), { op: input.op, blob: input.blob });
+        if (input.op === 'claim' && (typeof input.secret !== 'string' || !input.secret || input.secret.length > MAX_KEY_BLOB)) throw new HttpError(400, 'Invalid key');
+        return await rpc(env.IDENTITY.get(env.IDENTITY.idFromName(subject)), { op: input.op, blob: input.blob, secret: input.secret });
       }
       const channel = /^\/v1\/pair\/([^/]+)$/.exec(pathname)?.[1];
       if (channel && CHANNEL.test(channel)) {
@@ -199,11 +200,19 @@ export class Account {
   }
 }
 
-// The account secret wrapped with a key from the user's passphrase. Without the passphrase it opens nothing.
+// The account secret of a Google account, readable by the server. `blob` and the get and put operations serve builds
+// that still wrap the secret with a passphrase.
 export class Identity {
   constructor(ctx) { this.ctx = ctx; }
   async fetch(request) {
-    const { op, blob } = await request.json();
+    const { op, blob, secret } = await request.json();
+    // The first device's secret wins, so that every later sign-in joins the same chain.
+    if (op === 'claim') {
+      const claimed = await this.ctx.storage.get('secret');
+      if (claimed) return json({ secret: claimed });
+      await this.ctx.storage.put({ secret });
+      return json({ secret });
+    }
     const stored = await this.ctx.storage.get('blob');
     if (op === 'get') return json({ blob: stored ?? null });
     if (op === 'delete') { await this.ctx.storage.deleteAll(); return json({ ok: true }); }
